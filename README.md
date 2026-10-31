@@ -4,7 +4,7 @@ A Forge hackathon project for an agentic geospatial flood-risk investigation sys
 
 ## Current stage
 
-The Streamlit scaffold provides latitude/longitude inputs and an **Investigate** button. The UI is not yet connected to data fetching and does not produce risk assessments. Separate Open-Meteo weather and OpenTopoData terrain services are available for future UI and agent integration. Maps and AI agents are not implemented.
+The Streamlit scaffold provides latitude/longitude inputs and an **Investigate** button. The UI is not yet connected to data fetching and does not produce risk assessments. Separate Open-Meteo weather and OpenTopoData terrain services and an evidence aggregator are available for future UI and agent integration. Maps and AI agents are not implemented.
 
 FloodSense AI does not provide scientifically validated flood predictions.
 
@@ -28,8 +28,10 @@ app.py             Streamlit UI and coordinate input validation
 services/weather.py Real Open-Meteo fetching, parsing, and precipitation totals
 services/terrain.py Real OpenTopoData elevation fetching and parsing
 analysis/terrain.py Descriptive local elevation differences
+analysis/evidence.py Combined weather/terrain evidence and availability reporting
 tests/test_weather.py Offline parser, calculation, and failure-handling tests
 tests/test_terrain.py Offline terrain, geometry, and API failure tests
+tests/test_evidence.py Mocked aggregation, failure isolation, and missing-data tests
 data/__init__.py   Reserved for real API and permitted dataset access
 analysis/__init__.py Reserved for analysis logic
 ai/__init__.py     Reserved for the future LLM agent
@@ -159,3 +161,82 @@ scientifically validated flood predictions.
 
 The test command above runs both weather and terrain tests. Synthetic fixtures
 are for offline unit tests only and are never substituted for API data.
+
+## Evidence aggregation
+
+```python
+import json
+from analysis.evidence import build_evidence
+
+try:
+    report = build_evidence(28.6139, 77.2090)
+    print(json.dumps(report, allow_nan=False))
+except ValueError as error:
+    print(f"Invalid coordinates: {error}")
+```
+
+`build_evidence(latitude, longitude)` accepts numeric WGS84 coordinates and
+validates them before any network request. It calls each existing service once,
+using its defaults, and preserves each returned dictionary without modification.
+It does not retry or cache across calls. Reuse one report throughout an
+investigation to avoid duplicate API requests. Normal service timeouts apply;
+requests are sequential, and source retrieval times may differ.
+
+The JSON-serializable report uses stable **schema version `1.0`**:
+
+| Key | Meaning |
+| --- | --- |
+| `schema_version` | Schema identifier, currently `"1.0"`. |
+| `requested_coordinates` | Numeric `latitude` and `longitude` in WGS84 degrees. |
+| `generated_at` | ISO 8601 UTC assembly time; source retrieval times stay in source data. |
+| `status` | Evidence coverage: `available`, `partial`, or `unavailable`. Never a risk level. |
+| `weather`, `terrain` | Source entries described below. |
+| `warnings` | List of `{source, code, message}` entries; `source` is `weather` or `terrain`. These are data-quality messages, not official weather/emergency alerts. |
+| `limitations` | List of scientific and interpretation limitations that always accompanies the report. |
+
+Each source entry has the same keys:
+
+| Key | Meaning |
+| --- | --- |
+| `source` | `Open-Meteo` or `OpenTopoData`. |
+| `endpoint_url` | Known service endpoint; not a claim of successful retrieval. |
+| `status` | `available` if all relevant measurements exist; `partial` if some exist; `unavailable` if none exist or the request failed. |
+| `data` | Complete original service result, or `null` after a service error. |
+| `error` | `null` or `{type, message, retry_after}`; `retry_after` is the raw rate-limit header when available, otherwise `null`. |
+| `warnings` | List of `{code, message}` objects. Codes are `source_error` and `missing_measurements`. |
+| `limitations` | Original service limitation as a list, or an empty list when retrieval failed. Global limitations still apply. |
+
+Overall status is `available` only when both sources are fully available,
+`unavailable` when both are unavailable, and `partial` otherwise. A successful
+all-null response is preserved under `data`, with `status="unavailable"` and
+`error=null`. That differs from an API failure, where `data=null` and `error`
+describes the failure. Missing precipitation probability makes weather partial
+even if its rainfall totals are available. Missing terrain pairs or summary
+measurements also make terrain partial. Zero measurements remain available.
+
+Use the original service field names inside `data`:
+
+| Evidence | Access path |
+| --- | --- |
+| Rainfall totals, units, missing-hour counts, UTC window boundaries | `report["weather"]["data"]["totals"]["24h"]` and `["48h"]`; each contains `precipitation`, `unit`, `missing_hours`, `window_start`, `window_end`. |
+| Hourly precipitation/probability and timestamps | `report["weather"]["data"]["hourly"]`. |
+| Weather units and time zone | Weather `data.hourly_units`, `data.source_units`, `data.timezone`, `data.timezone_abbreviation`, `data.utc_offset_seconds`. |
+| Elevation measurements and coordinates | `report["terrain"]["data"]["points"]`, using each point's `elevation_m`, coordinates, and `dataset`. |
+| Relative elevation differences | Terrain `data.relative_elevation`, `data.center_minus_neighbor_mean_m`, and `data.sample_elevation_range_m`. |
+| Terrain units, dataset, and sampling metadata | Terrain `data.elevation_unit`, `data.dataset`, `data.dataset_url`, `data.vertical_datum`, `data.sample_radius_m`. |
+| Exact request URL and retrieval time | Each source's `data.source_url` and `data.fetched_at`; documentation links and other original metadata are also retained. |
+
+Check `data is not None` before accessing these paths, and test measurements with
+`is None` rather than truthiness. Expected `WeatherError`/`TerrainError` failures
+are reported independently: one failure never discards the other source. If
+both fail, the report contains metadata/errors and no invented measurements.
+Unexpected programming or service-contract errors propagate for diagnosis.
+
+This is an evidence-based screening tool, not a validated flood prediction
+model. It generates no numerical flood probability, safe/unsafe label, or
+official warning. Preserve the report's limitations, source attribution, and
+missing-data information when passing it to an LLM or displaying results.
+
+The existing test command runs all three suites. Evidence tests mock service
+responses only inside unit tests; the production aggregator always calls the
+real services. No UI or AI-agent integration is included in this change.
