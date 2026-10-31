@@ -2,10 +2,12 @@
 
 ## Scope and prerequisites
 
-This guide describes the merged evidence dashboard at main commit `0bc9bfb`.
+This guide describes the evidence dashboard and standalone agent merged at
+main commit `fd675cb`.
 The dashboard calls real weather and terrain services directly; the combined
-evidence engine is a separate callable interface. The AI agent being developed
-on `feature/ai-agent` is not included or required. No deployment is performed by
+evidence engine is a separate callable interface. The AI agent under `ai/` is
+available through Python or `python -m ai` but is not integrated into Streamlit
+and is not required to run the dashboard. No deployment is performed by
 these instructions or by the automated tests.
 
 Use Python 3.11 (the locally verified version is 3.11.0), Git, and internet
@@ -34,14 +36,16 @@ in session state; edited coordinates do not replace results until resubmission.
 
 ## Dependencies and existing configuration
 
-`requirements.txt` declares `streamlit>=1.49,<2`, `pandas`, and `pydeck`. The
-dashboard directly imports all three, so pandas/pydeck are explicitly declared
+`requirements.txt` declares `streamlit>=1.49,<2`, `pandas`, `pydeck`, and
+`openai>=2.0,<3`. The
+dashboard directly imports Streamlit, pandas, and pydeck, so pandas/pydeck are explicitly declared
 rather than relying on Streamlit to supply them transitively. Services,
 analysis, and unittest use the Python standard library.
-No LLM SDK, API key, GDAL, or local raster datasets are required by this revision.
+The standalone agent uses the OpenAI SDK. No API key is required by the
+dashboard; GDAL and local raster datasets are not required by either interface.
 
-The inspected local environment has Streamlit 1.66.1, pandas 3.1.0, and pydeck
-0.9.3. These are observed installed versions, not a lockfile or a reproducible
+The inspected local environment has Streamlit 1.66.1, pandas 3.1.0, pydeck
+0.9.3, and OpenAI SDK 2.54.0. These are observed installed versions, not a lockfile or a reproducible
 dependency guarantee. No new version pins or compatibility bounds were inferred
 from this one environment; a tested version policy remains a release decision.
 The Streamlit minimum reflects dashboard use of
@@ -56,7 +60,7 @@ and let Cloud use the root `requirements.txt`. See the official
 ## Environment variables and secrets
 
 No application-specific environment variables or secrets are read by the
-current dashboard, weather/terrain services, or evidence engine. Public data
+dashboard, weather/terrain services, or evidence engine. Public data
 endpoints are fixed in the service modules. Setting an arbitrary API key,
 endpoint, or timeout environment variable will not change their behavior.
 There is no dotenv loader, so a `.env` file is not automatically consumed.
@@ -68,11 +72,31 @@ for example when running without a browser or on a different port:
 python -m streamlit run app.py --server.headless true --server.port 8502
 ```
 
-Do not add a speculative LLM secret yet. When the agent is merged, review its
-actual configuration contract and dependencies separately. If it requires
-secrets, use ignored local `.streamlit/secrets.toml` or environment injection,
-and the Cloud secret manager, with matching names in the consuming code.
-Streamlit supports local `st.secrets` and Cloud secret settings as described in
+The **standalone agent** requires both `OPENAI_API_KEY` and `OPENAI_MODEL` in
+its process environment. Inject the key through a trusted secret manager or
+shell prompt that does not echo it or save it in shell history. Set
+`OPENAI_MODEL` to an accessible model that supports Responses function calling
+and strict structured output; there is no default model or provider fallback.
+No model identifier or key is provided by this repository. `OPENAI_BASE_URL`
+is explicitly rejected by the default adapter.
+
+Once those variables are set, a manual live agent investigation can be run:
+
+```sh
+python -m ai 28.6139 77.2090
+```
+
+This makes real model and selected evidence requests and may incur provider
+charges. It is not part of the offline tests. Missing configuration yields an
+explicit configuration error, not a fabricated investigation. The CLI exits
+nonzero when the agent does not complete; inspect its structured result.
+The adapter configures a 30-second model request timeout with automatic retries
+disabled. Tool-call budgets and source limits also apply; see README.
+
+Neither `.env` nor `.streamlit/secrets.toml` is automatically loaded by the
+standalone CLI. Use process environment injection rather than assuming that
+creating either file configures it. Dashboard deployment still needs no agent
+secrets. Streamlit supports local `st.secrets` and Cloud secret settings as described in
 the [secret-management guide](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management).
 
 ## Streamlit Community Cloud
@@ -87,7 +111,9 @@ Follow the official [deployment instructions](https://docs.streamlit.io/deploy/s
    and entrypoint `app.py` at the repository root.
 4. In advanced settings select Python 3.11 if offered. If unavailable, select
    a supported version only after testing that version. Leave app secrets empty
-   for this revision; never paste credentials into code or logs.
+   for the current dashboard; the standalone agent is not exposed by this app.
+   Never paste credentials into code or logs. A future Streamlit agent integration
+   must explicitly connect secret configuration to the provider.
 5. Deploy and inspect build/runtime logs. Cloud discovers root dependencies;
    it does not use your local `.venv`. Record the resulting app URL and deployed
    commit, rather than inventing or assuming a URL.
@@ -106,7 +132,7 @@ basemap or flood boundary. Import checks do not verify browser rendering.
 ```sh
 python -m unittest discover -s tests -v
 python -m pip check
-python -c 'import app, services.weather, services.terrain, analysis.evidence, analysis.terrain, ai'
+python -c 'import app, services.weather, services.terrain, analysis.evidence, analysis.terrain, ai.agent, ai.provider, ai.tools, ai.contracts'
 git diff --check
 ```
 
@@ -118,7 +144,10 @@ production API timeouts. Existing unit tests use controlled mocks as well.
 
 These tests verify contracts and failure behavior, not accuracy of the upstream
 forecast/DEM or uptime. Synthetic boundary fixtures do not imply real SRTM
-coverage at the poles. Re-run this validation after future agent changes.
+coverage at the poles. The full suite also discovers `tests/test_agent.py`,
+including scripted-provider and mock-HTTP SDK tests. No live model calls or
+API keys are needed for automated validation. Live model behavior and factual
+correctness of generated recommendations still require separate evaluation.
 
 ## Sources, attribution, and scientific limits
 
@@ -179,9 +208,9 @@ timeouts each, not a single overall investigation deadline.
 - Exact coordinates appear in request URLs, session state, and evidence.
   Avoid sensitive locations in public demos/logs and review retention/access
   expectations before collecting user location histories.
-- Existing evidence tests are not a guarantee that a future agent preserves
-  uncertainty. Validate its prompts, dependencies, secrets, and displayed claims
-  after Harshita's branch is reviewed and merged.
+- Agent and evidence tests do not guarantee factual correctness of live model
+  output. Human review and live evaluations remain necessary; the standalone
+  agent is not an official advisory service or a validated flood model.
 - No tracked deployment automation or cloud runtime validation exists. Version
   reproducibility, shared quotas, and a manual
   Cloud/browser smoke check remain release decisions, not verified blockers

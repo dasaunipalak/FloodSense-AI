@@ -1,1 +1,1 @@
-"""Future LLM tool-calling agent. No AI integration implemented yet."""
+"""LLM evidence investigation, independent of the Streamlit dashboard."""

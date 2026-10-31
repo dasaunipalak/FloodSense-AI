@@ -4,7 +4,7 @@ A Forge hackathon project for an agentic geospatial flood-risk investigation sys
 
 ## Current stage
 
-The Streamlit dashboard accepts latitude/longitude inputs and retrieves real weather and terrain evidence when **Investigate Location** is submitted. It displays forecast charts, elevation measurements, source provenance, and a sample-location map. The combined evidence engine is available separately for future AI integration. AI agents and flood-risk scoring are not implemented in this revision.
+The Streamlit dashboard displays live Open-Meteo forecasts, OpenTopoData terrain samples, and an interactive sample map. A separate LLM investigation module under `ai/` can select real evidence tools through OpenAI's native Responses function-calling API. The agent is not integrated into Streamlit yet. Neither component calculates a flood-risk score or official warning.
 
 FloodSense AI does not provide scientifically validated flood predictions.
 
@@ -20,7 +20,7 @@ python -m pip check
 python -m streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit. Stop the server with Control-C. No API keys or application-specific environment variables are required for the current dashboard. Dependencies are Streamlit, pandas, and pydeck; services and analysis use the Python standard library. See [DEPLOYMENT.md](DEPLOYMENT.md) for Community Cloud setup, secret handling, troubleshooting, and remaining deployment limitations.
+Open the local URL printed by Streamlit. Stop the server with Control-C. No API keys or application-specific environment variables are required for the dashboard. Dependencies are Streamlit, pandas, pydeck, and the OpenAI SDK; the separate agent requires `OPENAI_API_KEY` and `OPENAI_MODEL` as documented below. Services and evidence analysis use the Python standard library. See [DEPLOYMENT.md](DEPLOYMENT.md) for setup, standalone-agent configuration, secret handling, troubleshooting, and deployment limitations.
 
 ## Project structure
 
@@ -35,7 +35,12 @@ tests/test_terrain.py Offline terrain, geometry, and API failure tests
 tests/test_evidence.py Mocked aggregation, failure isolation, and missing-data tests
 data/__init__.py   Reserved for real API and permitted dataset access
 analysis/__init__.py Reserved for analysis logic
-ai/__init__.py     Reserved for the future LLM agent
+ai/agent.py        Bounded LLM-selected tool loop and structured report validation
+ai/provider.py     Official OpenAI Responses adapter and environment configuration
+ai/tools.py        Real evidence tools and investigation-local cache
+ai/contracts.py    Strict schemas and evidence-grounding system instruction
+ai/__main__.py     Standalone agent CLI (no Streamlit integration)
+tests/test_agent.py Offline agent, tool-cache, and SDK adapter tests
 AGENTS.md          Development and hackathon rules
 requirements.txt   Python dependencies
 .gitignore         Excludes virtual environments, caches, and secrets
@@ -52,7 +57,7 @@ DEPLOYMENT.md      Local/Cloud deployment, validation, and operational guidance
 - Keep keys and credentials out of version control.
 - Explain uncertainty and limitations; do not claim scientific validation.
 
-An LLM tool-calling agent is future work.
+The agent is implemented separately from the dashboard; live model behavior still requires verification with a configured API key and model.
 
 ## Weather service
 
@@ -239,6 +244,125 @@ model. It generates no numerical flood probability, safe/unsafe label, or
 official warning. Preserve the report's limitations, source attribution, and
 missing-data information when passing it to an LLM or displaying results.
 
-The existing test command runs all three suites. Evidence tests mock service
-responses only inside unit tests; the production aggregator always calls the
-real services. No UI or AI-agent integration is included in this change.
+The existing test command also discovers the new agent tests. Evidence and agent
+tests mock responses only inside offline unit tests. Production tools always
+call real services or reuse results retrieved in the same investigation.
+
+## AI investigation agent
+
+Install `requirements.txt` in the project virtual environment. The default
+adapter uses the official `openai` Python SDK (`>=2.0,<3`) and the
+[Responses function-calling API](https://developers.openai.com/api/docs/guides/function-calling).
+It requires a model that supports Responses function calling and strict
+[structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+There is deliberately no hardcoded model or key and no provider auto-fallback.
+
+Set `OPENAI_API_KEY` and `OPENAI_MODEL` in your process environment using your
+local secret-management method. Do not paste secrets into chat, commit them, or
+put them in command-line arguments. The app does not automatically read `.env`
+files or Streamlit secrets. `OPENAI_BASE_URL` is rejected by the default adapter;
+an alternative provider must be an explicit adapter, not an implicit proxy.
+
+After setting both environment variables, run from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m ai 28.6139 77.2090
+```
+
+These coordinates are an example location, not observational data. Each run
+contacts the configured LLM and whichever evidence services it selects. Selected
+coordinates, the task, and retrieved evidence are sent to OpenAI. Provider
+requests use `store=False`, a 30-second SDK timeout, no automatic retries, and
+at most 4,000 output tokens per response. Account billing and data-retention
+policies still apply; `store=False` is not a claim of zero retention.
+
+Programmatic entry point:
+
+```python
+from ai.agent import investigate
+
+result = investigate(latitude, longitude)
+if result["agent_status"] == "completed":
+    report = result["final_report"]
+```
+
+`task=` optionally focuses the investigation, up to 4,000 characters. Invalid
+caller coordinates/tasks raise `ValueError` before any network operation.
+Missing configuration produces `agent_status="configuration_error"`; no
+evidence APIs are called and no substitute report is invented.
+
+### Architecture and workflow
+
+1. The selected coordinates are validated and pinned in strict tool schemas.
+2. The LLM chooses from `get_weather_evidence`, `get_terrain_evidence`, and
+   `get_combined_evidence`. There is no fixed Python sequence that calls all
+   three tools. Tool arguments are validated again locally, including exact
+   coordinate equality, allowed names, finite numbers, and no extra keys.
+3. Real tool outputs are returned to the model using native
+   `function_call_output` items matched by call ID. Native reasoning context is
+   retained privately for continuation; the public trace contains tool calls
+   and results, not purported internal reasoning.
+4. The model can inspect missingness, choose another source, compare findings,
+   and decide whether the evidence supports a limited final explanation.
+5. Final JSON must include investigation summary, weather findings, terrain
+   findings, evidence gaps, preparedness considerations, limitations, and the
+   exact retrieved source IDs. Code attaches canonical source URLs and retrieval
+   timestamps; invented/omitted IDs and generated web links are rejected.
+
+Each investigation has its own in-memory cache. Repeated tools reuse successful,
+partial, all-null, failed, and rate-limited results without retries. A combined
+call on an empty cache invokes Palak's unchanged `build_evidence` and seeds both
+source caches. When individual results already exist, the combined tool fetches
+only the missing source and assembles the public evidence-v1 shape. This is
+necessary because `build_evidence` has no pre-fetched-input parameter. It does
+not monkeypatch service globals or change the analysis module. Contract tests
+compare the assembled shape with the real aggregator. The cache is discarded
+after each investigation; forecasts are never persistently cached.
+
+The loop permits at most **5 tool-call rounds** and **6 dispatch attempts**;
+cache hits and invalid dispatch attempts count toward the latter. A combined
+tool is one dispatch but can request two upstream services. There can be one
+final-only model response after the tool budget is exhausted (at most 6 model
+requests total). Calls beyond a limit are recorded as blocked, not executed.
+Service timeouts remain those of the existing modules. API failures are data
+gaps; unexpected service/schema errors terminate the investigation safely.
+
+### Result contract and limitations
+
+The return value is JSON-serializable and includes:
+
+- `selected_coordinates`, `agent_status`, and `final_report` (null on failure).
+- `tools_used` and `tool_call_trace`: actual LLM-requested calls, arguments,
+  availability/rejection/error status, results, and reused sources.
+- `evidence`: original source data in availability envelopes, including nulls.
+- `evidence_source_references`: canonical retrieved URLs and timestamps only;
+  a failed request does not acquire a fabricated retrieval reference.
+- `errors`, `warnings`, `tool_rounds`, and `tool_executions`.
+
+Statuses are `completed`, `configuration_error`, `provider_error`,
+`invalid_response`, `refused`, `tool_error`, or `limit_reached`. `completed`
+means a structurally valid explanation was generated, not that evidence is
+complete or that a location is safe. Both APIs can fail and the model can still
+produce an explanation of those gaps. Always display errors, warnings, and
+source availability alongside a report.
+
+The system instruction prohibits fabricated measurements, flood probabilities,
+official warnings, safe/unsafe labels, and unverified evacuation routes.
+Preparedness is general and refers users to local official advisories. Schema
+and citation checks do **not** prove that every sentence generated by an LLM is
+factually correct or safe. Human review and live model evaluations remain
+necessary before integrating or deploying this agent. There is no hydrological
+model, routing engine, official advisory feed, or flood-risk score.
+
+Run all offline tests with:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Agent tests use synthetic evidence and scripted model responses only inside
+`tests/test_agent.py`. They exercise dispatch, schema/coordinate validation,
+missing measurements, independent/both-source failures, rate limits, caching,
+loop bounds, provider errors, JSON serialization, and native SDK request wiring.
+No live LLM investigation was verified during implementation because neither
+`OPENAI_API_KEY` nor `OPENAI_MODEL` was configured in the local environment.
