@@ -35,7 +35,7 @@ def show_weather(data):
     st.caption("Missing hours remain missing. Precipitation probability is not flood probability.")
     with st.expander("Hourly values and weather provenance"):
         table = hourly.drop(columns="source_time")
-        st.dataframe(table.astype(object).where(table.notna(), "Unavailable").astype(str), hide_index=True, use_container_width=True)
+        st.dataframe(table.astype(object).where(table.notna(), "Unavailable").astype(str), hide_index=True, width="stretch")
         st.markdown(f"[Open-Meteo documentation]({data['documentation_url']}) · [Exact API request]({data['source_url']})")
         st.json({key: data[key] for key in ("requested_coordinates", "grid_coordinates", "hourly_units", "timezone", "fetched_at")})
         st.caption("Retrieval time is not model initialization time. Forecast grid coordinates can differ from the selected location.")
@@ -54,7 +54,7 @@ def show_terrain(data):
         "Longitude": point["longitude"], "Elevation": measurement(point["elevation_m"]),
         "Neighbor − center": "Reference point" if point["label"] == "center" else measurement(differences[point["label"]]),
     } for point in data["points"]]
-    st.dataframe(rows, hide_index=True, use_container_width=True)
+    st.dataframe(rows, hide_index=True, width="stretch")
     if data["missing_points"]:
         st.warning(f"{data['missing_points']} elevation samples unavailable. Summaries require all five points; individual differences require both elevations.")
     st.write("A positive neighbor − center difference means that sample is higher than your selected location; a negative difference means it is lower. Center − neighbor mean compares your location with the average of the four surrounding samples.")
@@ -99,7 +99,7 @@ def main():
         with st.form("investigation"):
             latitude = st.number_input("Latitude", min_value=-90.0, max_value=90.0, value=None, step=0.0001, format="%.4f", placeholder="−90 to 90")
             longitude = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=None, step=0.0001, format="%.4f", placeholder="−180 to 180")
-            investigate = st.form_submit_button("Investigate Location", type="primary", use_container_width=True)
+            investigate = st.form_submit_button("Investigate Location", type="primary", width="stretch")
         st.caption("Each submission requests fresh evidence. Results and failures are retained during ordinary reruns. Submit again to refresh; defer requests if rate limited.")
         st.divider()
         st.markdown("**Sources**\n\n[Open-Meteo](https://open-meteo.com/) · [OpenTopoData](https://www.opentopodata.org/)")
