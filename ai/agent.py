@@ -4,7 +4,7 @@ import json
 import re
 
 from ai.contracts import REPORT_SECTIONS, SYSTEM_INSTRUCTION, strict_json, tool_definitions
-from ai.provider import ConfigurationError, OpenAIProvider, ProviderError
+from ai.provider import ConfigurationError, ProviderError, provider_from_environment
 from ai.tools import EvidenceTools
 
 MAX_TOOL_ROUNDS = 5
@@ -102,12 +102,12 @@ def investigate(latitude, longitude, *, task=DEFAULT_TASK, provider=None):
               "evidence_source_references": [], "evidence": {}, "errors": [],
               "warnings": [DISCLAIMER], "tool_rounds": 0, "tool_executions": 0}
 
-    def stop(status, code=None, message=None):
+    def stop(status, code=None, message=None, diagnostics=None):
         result["agent_status"] = status
         result["evidence_source_references"] = evidence.references()
         result["evidence"] = evidence.cache
         if code:
-            result["errors"].append({"code": code, "message": message})
+            result["errors"].append({"code": code, "message": message, **(diagnostics or {})})
         for kind in ("weather", "terrain"):
             entry = evidence.cache.get(kind)
             if entry is None:
@@ -124,11 +124,11 @@ def investigate(latitude, longitude, *, task=DEFAULT_TASK, provider=None):
     owned = provider is None
     if owned:
         try:
-            provider = OpenAIProvider.from_environment()
+            provider = provider_from_environment()
         except ConfigurationError as exc:
             return stop("configuration_error", "configuration_error", str(exc))
         except Exception:
-            return stop("configuration_error", "configuration_error", "The OpenAI client could not be initialized; raw details were withheld.")
+            return stop("configuration_error", "configuration_error", "The LLM client could not be initialized; raw details were withheld.")
     history = [{"role": "user", "content": json.dumps({
         "selected_coordinates": coordinates, "investigation_task": task,
     }, allow_nan=False)}]
@@ -146,7 +146,7 @@ def investigate(latitude, longitude, *, task=DEFAULT_TASK, provider=None):
                 response = provider.respond(instructions=instructions, history=history,
                                             tools=tools, allow_tools=allow_tools)
             except ProviderError as exc:
-                return stop("provider_error", exc.code, str(exc))
+                return stop("provider_error", exc.code, str(exc), diagnostics=exc.diagnostics)
             except Exception:
                 return stop("provider_error", "provider_error", "Unexpected provider failure; raw error details were withheld.")
             try:

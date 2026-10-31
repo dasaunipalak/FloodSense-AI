@@ -2,3 +2,5 @@ streamlit>=1.49,<2
 pandas
 pydeck
 openai>=2.0,<3
+python-dotenv>=1.0,<2
+google-genai>=1.75,<2
