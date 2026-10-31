@@ -16,15 +16,16 @@ Requires Python 3.11 or newer. From the project directory on macOS:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-streamlit run app.py
+python -m pip check
+python -m streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit. Stop the server with Control-C. No API keys are needed for the dashboard; the separate agent requires the environment settings below.
+Open the local URL printed by Streamlit. Stop the server with Control-C. No API keys or application-specific environment variables are required for the dashboard. Dependencies are Streamlit, pandas, pydeck, and the OpenAI SDK; the separate agent requires `OPENAI_API_KEY` and `OPENAI_MODEL` as documented below. Services and evidence analysis use the Python standard library. See [DEPLOYMENT.md](DEPLOYMENT.md) for setup, standalone-agent configuration, secret handling, troubleshooting, and deployment limitations.
 
 ## Project structure
 
 ```text
-app.py             Streamlit UI and coordinate input validation
+app.py             Live weather/terrain evidence dashboard and sample-location map
 services/weather.py Real Open-Meteo fetching, parsing, and precipitation totals
 services/terrain.py Real OpenTopoData elevation fetching and parsing
 analysis/terrain.py Descriptive local elevation differences
@@ -44,6 +45,7 @@ AGENTS.md          Development and hackathon rules
 requirements.txt   Python dependencies
 .gitignore         Excludes virtual environments, caches, and secrets
 README.md          Project status and setup instructions
+DEPLOYMENT.md      Local/Cloud deployment, validation, and operational guidance
 ```
 
 ## Data integrity and security
