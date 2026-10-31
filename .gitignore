@@ -1,0 +1,25 @@
+# Python and local virtual environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local secrets (commit only sanitized example files)
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.pem
+*.key
+.aws/
+.ssh/
+credentials.json
+service-account*.json
+*.p12
+*.pfx
+
+# Local output and operating system files
+*.log
+.DS_Store
