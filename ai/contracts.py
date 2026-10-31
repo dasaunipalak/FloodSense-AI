@@ -45,7 +45,11 @@ Interpret neighbor-minus-center signs correctly. Preserve units, UTC forecast
 windows and retrieval times; retrieval is not survey/model initialization time.
 
 Return the requested JSON report with all sections nonempty. Ground findings
-only in retrieved tool results. State when a source was not requested, failed,
+only in retrieved tool results. For timing claims, cite the explicit evidence
+timestamps and timezone. Do not describe an event as early, middle, or late
+in the forecast period; use its timestamp instead. Distinguish hourly interval
+end timestamps from total window boundaries. If timing evidence is missing,
+state that timing is unavailable rather than inferring it. State when a source was not requested, failed,
 or contains missing values. Explicitly discuss uncertainty and evidence gaps,
 including absent river levels, drainage, soil saturation and observed flooding.
 Preparedness considerations must be general and encourage following local

@@ -4,7 +4,7 @@ A Forge hackathon project for an agentic geospatial flood-risk investigation sys
 
 ## Current stage
 
-The Streamlit dashboard displays live Open-Meteo forecasts, OpenTopoData terrain samples, and an interactive sample map. A separate LLM investigation module under `ai/` can select real evidence tools through OpenAI's native Responses function-calling API. The agent is not integrated into Streamlit yet. Neither component calculates a flood-risk score or official warning.
+The Streamlit dashboard displays live Open-Meteo forecasts, OpenTopoData terrain samples, and an interactive sample map. A separate LLM investigation module under `ai/` selects real evidence tools through Gemini native function calling by default, or OpenAI Responses function calling when explicitly selected. The agent is not integrated into Streamlit yet. Neither component calculates a flood-risk score or official warning.
 
 FloodSense AI does not provide scientifically validated flood predictions.
 
@@ -20,7 +20,7 @@ python -m pip check
 python -m streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit. Stop the server with Control-C. No API keys or application-specific environment variables are required for the dashboard. Dependencies are Streamlit, pandas, pydeck, and the OpenAI SDK; the separate agent requires `OPENAI_API_KEY` and `OPENAI_MODEL` as documented below. Services and evidence analysis use the Python standard library. See [DEPLOYMENT.md](DEPLOYMENT.md) for setup, standalone-agent configuration, secret handling, troubleshooting, and deployment limitations.
+Open the local URL printed by Streamlit. Stop the server with Control-C. No API keys or application-specific environment variables are required for the dashboard. The separate agent uses the Google Gen AI SDK by default, with the OpenAI SDK available as an alternative; configure the selected provider as documented below. Services and evidence analysis use the Python standard library. See [DEPLOYMENT.md](DEPLOYMENT.md) for setup, standalone-agent configuration, secret handling, troubleshooting, and deployment limitations.
 
 ## Project structure
 
@@ -36,11 +36,13 @@ tests/test_evidence.py Mocked aggregation, failure isolation, and missing-data t
 data/__init__.py   Reserved for real API and permitted dataset access
 analysis/__init__.py Reserved for analysis logic
 ai/agent.py        Bounded LLM-selected tool loop and structured report validation
-ai/provider.py     Official OpenAI Responses adapter and environment configuration
+ai/provider.py     Provider selection, root dotenv loading, OpenAI Responses adapter
+ai/gemini.py       Google Gen AI native function-calling adapter
 ai/tools.py        Real evidence tools and investigation-local cache
 ai/contracts.py    Strict schemas and evidence-grounding system instruction
 ai/__main__.py     Standalone agent CLI (no Streamlit integration)
 tests/test_agent.py Offline agent, tool-cache, and SDK adapter tests
+tests/test_gemini.py Offline Gemini, provider selection, and SDK transport tests
 AGENTS.md          Development and hackathon rules
 requirements.txt   Python dependencies
 .gitignore         Excludes virtual environments, caches, and secrets
@@ -57,7 +59,7 @@ DEPLOYMENT.md      Local/Cloud deployment, validation, and operational guidance
 - Keep keys and credentials out of version control.
 - Explain uncertainty and limitations; do not claim scientific validation.
 
-The agent is implemented separately from the dashboard; live model behavior still requires verification with a configured API key and model.
+The agent is implemented separately from the dashboard. A controlled live investigation with `gemini-3.1-flash-lite` successfully requested weather and terrain tools, retrieved real evidence, and produced a source-grounded report with a matching trace. This verifies that run, not every future model response.
 
 ## Weather service
 
@@ -250,31 +252,70 @@ call real services or reuse results retrieved in the same investigation.
 
 ## AI investigation agent
 
-Install `requirements.txt` in the project virtual environment. The default
-adapter uses the official `openai` Python SDK (`>=2.0,<3`) and the
+Install `requirements.txt` in the project virtual environment. Provider selection
+uses `LLM_PROVIDER=gemini` or `LLM_PROVIDER=openai`; Gemini is the default when
+the variable is absent. The maintained `google-genai` SDK (`>=1.75,<2`) provides
+[Gemini native function calling](https://ai.google.dev/gemini-api/docs/generate-content/function-calling).
+The deprecated `google-generativeai` package is not used. OpenAI support uses the
+official `openai` SDK and its
 [Responses function-calling API](https://developers.openai.com/api/docs/guides/function-calling).
-It requires a model that supports Responses function calling and strict
-[structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
-There is deliberately no hardcoded model or key and no provider auto-fallback.
 
-Set `OPENAI_API_KEY` and `OPENAI_MODEL` in your process environment using your
-local secret-management method. Do not paste secrets into chat, commit them, or
-put them in command-line arguments. The app does not automatically read `.env`
-files or Streamlit secrets. `OPENAI_BASE_URL` is rejected by the default adapter;
-an alternative provider must be an explicit adapter, not an implicit proxy.
+Create or edit `.env` in the repository root using `.env.example` as a template.
+Preserve any existing local credentials. For Gemini, fill in only the real
+`GEMINI_API_KEY` locally and choose an accessible `GEMINI_MODEL`:
 
-After setting both environment variables, run from the repository root:
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+The model names above are configuration examples, not hardcoded runtime defaults.
+The selected provider requires its corresponding key and model. Never paste
+keys into chat, command arguments, logs, or Git. `.env` and `.env.*` are ignored;
+only the sanitized `.env.example` is trackable. Streamlit secrets are not read
+by this standalone CLI.
+
+`python-dotenv` loads the exact repository-root `.env` before provider selection,
+regardless of shell directory. Existing process variables take precedence;
+an empty process key will still mask a nonempty `.env` key and cause a
+configuration error. Unset that empty variable in your local shell if needed.
+The loader never prints configuration values. `OPENAI_BASE_URL` remains rejected
+by the OpenAI adapter.
+
+Windows PowerShell, from the repository root:
 
 ```powershell
-.\.venv\Scripts\python.exe -m ai 28.6139 77.2090
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m ai 29.2183 79.5130
+```
+
+macOS/Linux, from the repository root:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m ai 29.2183 79.5130
 ```
 
 These coordinates are an example location, not observational data. Each run
-contacts the configured LLM and whichever evidence services it selects. Selected
-coordinates, the task, and retrieved evidence are sent to OpenAI. Provider
-requests use `store=False`, a 30-second SDK timeout, no automatic retries, and
-at most 4,000 output tokens per response. Account billing and data-retention
-policies still apply; `store=False` is not a claim of zero retention.
+contacts the selected LLM and whichever real evidence services it chooses.
+Selected coordinates, task text, and retrieved evidence are sent to the selected
+provider. The SDKs make no automatic retries, use a 30-second request timeout,
+and permit at most 4,000 output tokens per response. Account quotas, model
+availability, billing, and provider data-use policies apply. Free-tier access is
+not guaranteed; a quota error terminates the investigation without switching
+providers. The verified model is `gemini-3.1-flash-lite`. Google lists a free tier for this model, but model listing or a successful request does not establish your project's free-tier eligibility, remaining quota, or billing status. Check Google AI Studio before running investigations.
+
+For an explicit OpenAI fallback, set `LLM_PROVIDER=openai` in `.env` and supply
+`OPENAI_API_KEY` and `OPENAI_MODEL`. The chosen model must support Responses
+function calling and strict
+[structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+OpenAI requests continue using `store=False`; that is not a zero-retention
+guarantee. There is no automatic fallback to a paid provider on errors.
 
 Programmatic entry point:
 
@@ -298,16 +339,28 @@ evidence APIs are called and no substitute report is invented.
    `get_combined_evidence`. There is no fixed Python sequence that calls all
    three tools. Tool arguments are validated again locally, including exact
    coordinate equality, allowed names, finite numbers, and no extra keys.
-3. Real tool outputs are returned to the model using native
-   `function_call_output` items matched by call ID. Native reasoning context is
-   retained privately for continuation; the public trace contains tool calls
-   and results, not purported internal reasoning.
+3. Real tool outputs return through each provider's native protocol: Gemini
+   `FunctionResponse` parts or OpenAI `function_call_output` items. The Gemini
+   adapter normalizes calls into the existing loop's transport contract and
+   retains full original Google model content privately, preserving thought
+   signatures and native call IDs across rounds. Locally assigned correlation
+   IDs identify actual Gemini calls even when the API omits an ID. The public
+   trace contains requested tools and results, not purported internal reasoning.
 4. The model can inspect missingness, choose another source, compare findings,
    and decide whether the evidence supports a limited final explanation.
 5. Final JSON must include investigation summary, weather findings, terrain
    findings, evidence gaps, preparedness considerations, limitations, and the
    exact retrieved source IDs. Code attaches canonical source URLs and retrieval
    timestamps; invented/omitted IDs and generated web links are rejected.
+
+Google SDK automatic function execution is explicitly disabled; the shared
+loop alone dispatches tools and enforces budgets. Gemini uses `AUTO` native
+function calling, so the model decides which tools to invoke. The adapter
+configuration does not combine tools with structured-output mode: tool-enabled
+turns receive the report schema in instructions and final JSON is checked by the
+existing validator. A final-only turn after tool exhaustion uses Google's
+structured JSON schema mode with no tools. Malformed/empty final text is an
+error, never replaced with a prewritten report.
 
 Each investigation has its own in-memory cache. Repeated tools reuse successful,
 partial, all-null, failed, and rate-limited results without retries. A combined
@@ -364,5 +417,44 @@ Agent tests use synthetic evidence and scripted model responses only inside
 `tests/test_agent.py`. They exercise dispatch, schema/coordinate validation,
 missing measurements, independent/both-source failures, rate limits, caching,
 loop bounds, provider errors, JSON serialization, and native SDK request wiring.
-No live LLM investigation was verified during implementation because neither
-`OPENAI_API_KEY` nor `OPENAI_MODEL` was configured in the local environment.
+`tests/test_gemini.py` additionally checks provider selection, native call parsing,
+actual result responses, multiple rounds and parallel calls, thought-signature
+preservation, trace accuracy, caching, validation, source references, loop limits,
+and sanitized key/quota/network/timeout errors. An offline HTTP transport verifies
+the real Google SDK's request/response serialization without contacting Gemini.
+The original OpenAI tests remain unchanged. Live Gemini execution has been verified once with `gemini-3.1-flash-lite`; offline tests do not make model requests. Further live evaluations require explicit authorization.
+
+A live report used an imprecise relative timing description. The system instruction now requires explicit evidence timestamps and timezone for timing claims instead of unsupported early/middle/late labels. Offline coverage verifies that the instruction reaches Gemini and that hourly evidence is preserved; it cannot guarantee model compliance.
+
+### Windows offline test harness
+
+On Windows/Python 3.11, the existing dashboard tests patch all socket connects.
+This also blocks the loopback socket pair used by asyncio during Streamlit
+AppTest startup, before dashboard code executes. The standard command currently
+reports four failures for this reason. To run all assertions with the socket
+guard unchanged, pre-create event loops before loading the test suite:
+
+```powershell
+@'
+import asyncio
+import unittest
+
+loops = [asyncio.new_event_loop() for _ in range(24)]
+pool = iter(loops)
+original = asyncio.new_event_loop
+asyncio.new_event_loop = lambda: next(pool)
+try:
+    suite = unittest.defaultTestLoader.discover("tests")
+    result = unittest.TextTestRunner(verbosity=1).run(suite)
+finally:
+    asyncio.new_event_loop = original
+    for loop in loops:
+        if not loop.is_closed():
+            loop.close()
+raise SystemExit(not result.wasSuccessful())
+'@ | .\.venv\Scripts\python.exe -B -
+```
+
+Validation: all 125 tests passed with this harness; the standard Windows command
+passed 121 and failed the four AppTest startup cases. No test assertions or
+network guards were removed. The portable test-runner issue remains unresolved.

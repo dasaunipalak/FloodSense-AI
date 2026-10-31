@@ -1,8 +1,16 @@
-"""Official OpenAI Responses adapter. Importing this module makes no requests."""
+"""Provider selection and the official OpenAI Responses adapter."""
 
 import os
+import math
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from ai.contracts import REPORT_SCHEMA
+
+# Resolve from this module, never from the current shell directory. Existing
+# process variables take precedence (including empty values); do not overwrite.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 
 
 class ConfigurationError(Exception):
@@ -12,9 +20,46 @@ class ConfigurationError(Exception):
 class ProviderError(Exception):
     """Sanitized provider failure with a machine-readable code."""
 
-    def __init__(self, code, message):
+    PROVIDER_STATUSES = frozenset({
+        "INVALID_ARGUMENT", "NOT_FOUND", "PERMISSION_DENIED", "UNAUTHENTICATED",
+        "RESOURCE_EXHAUSTED", "UNAVAILABLE", "INTERNAL",
+    })
+    EXCEPTION_TYPES = frozenset({"APIError", "ClientError", "ServerError"})
+
+    def __init__(self, code, message, *, http_status=None, provider_status=None,
+                 exception_type=None, retry_after_seconds=None):
         super().__init__(message)
         self.code = code
+        self.http_status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        self.provider_status = (provider_status if type(provider_status) is str
+                                and provider_status in self.PROVIDER_STATUSES else None)
+        self.exception_type = (exception_type if type(exception_type) is str
+                               and exception_type in self.EXCEPTION_TYPES else None)
+        self.retry_after_seconds = None
+        if type(retry_after_seconds) in (int, float):
+            try:
+                if math.isfinite(retry_after_seconds) and retry_after_seconds >= 0:
+                    self.retry_after_seconds = retry_after_seconds
+            except OverflowError:
+                pass
+
+    @property
+    def diagnostics(self):
+        """Only validated scalars; never SDK objects, headers, or payloads."""
+        return {"http_status": self.http_status, "provider_status": self.provider_status,
+                "exception_type": self.exception_type,
+                "retry_after_seconds": self.retry_after_seconds}
+
+
+def provider_from_environment():
+    """Choose one provider explicitly; errors never trigger paid auto-fallback."""
+    name = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    if name == "gemini":
+        from ai.gemini import GeminiProvider
+        return GeminiProvider.from_environment()
+    if name == "openai":
+        return OpenAIProvider.from_environment()
+    raise ConfigurationError("LLM_PROVIDER must be gemini or openai.")
 
 
 class OpenAIProvider:
