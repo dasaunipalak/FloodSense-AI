@@ -1,4 +1,4 @@
-"""Evidence-only dashboard using the project's real weather and terrain services."""
+"""Evidence and AI investigation dashboard using the project's real weather and terrain services."""
 
 import pandas as pd
 import pydeck as pdk
@@ -87,23 +87,88 @@ def show_map(latitude, longitude, terrain):
     st.caption("Blue: selected location / center sample. Green: surrounding samples. The center is one of the five terrain samples. Hover for details. Markers are sampling locations, not flood zones.")
 
 
+def show_ai(latitude, longitude):
+    st.header("AI interpretation")
+    saved = st.session_state.get("ai_investigation")
+    if saved is None:
+        st.info("Select Run AI Investigation to request an interpretation. The evidence dashboard works without an LLM key.")
+        return
+    lat, lon = saved["coordinates"]
+    result = saved["result"]
+    st.subheader(f"AI investigation for {lat:.4f}, {lon:.4f}")
+    if (latitude, longitude) != (lat, lon):
+        st.warning("Previous AI investigation belongs to an earlier location, not the currently selected coordinates.")
+    st.caption("Retained result from the last explicit AI request; reruns do not contact the model.")
+    st.write(f"Investigation status: {result['agent_status']}")
+    messages = {
+        "configuration_error": "AI configuration is missing or invalid. Configure the selected provider's API key and model locally; the evidence dashboard still works without them.",
+        "provider_rate_limit": "AI provider quota or rate limit reached. No automatic retry was made.",
+        "provider_authentication": "AI authentication or access failed. Check the local key and permissions.",
+        "provider_timeout": "AI provider timed out. No automatic retry was made.",
+        "provider_network_error": "AI provider could not be reached. No automatic retry was made.",
+        "source_error": "An evidence source was unavailable; inspect availability below.",
+    }
+    for error in result.get("errors", []):
+        st.error(messages.get(error.get("code"), "AI investigation encountered an error. No automatic retry was made; no substitute report was invented."))
+        from ai.provider import ProviderError
+        diagnostics = ProviderError("", "", **{key: error.get(key) for key in
+            ("http_status", "provider_status", "exception_type", "retry_after_seconds")}).diagnostics
+        if any(value is not None for value in diagnostics.values()):
+            st.json(diagnostics)
+    for warning in result.get("warnings", []):
+        st.warning(warning)
+    report = result.get("final_report")
+    if result["agent_status"] == "completed" and report:
+        for key, label in (("investigation_summary", "Investigation summary"),
+                           ("weather_findings", "Weather interpretation"),
+                           ("terrain_findings", "Terrain interpretation"),
+                           ("evidence_gaps", "Missing information"),
+                           ("preparedness_considerations", "General preparedness"),
+                           ("limitations", "Limitations")):
+            st.subheader(label)
+            st.text(report[key])
+    else:
+        st.info("No AI report was generated. Any previously loaded dashboard evidence remains above. Agent-retrieved evidence, if any, is listed separately below.")
+    st.subheader("Live evidence used by the agent")
+    st.caption("API-retrieved forecasts and historical terrain samples, separate from AI interpretation. Retrieval times may differ from the dashboard refresh.")
+    for name in ("weather", "terrain"):
+        entry = result.get("evidence", {}).get(name)
+        st.write(f"{name.title()}: {entry['status'] if entry else 'Not retrieved'}")
+        if entry:
+            with st.expander(f"Agent {name} evidence"):
+                st.json(entry)
+    for source in result.get("evidence_source_references", []):
+        st.write(f"{source['source']} · Retrieved {source['fetched_at']}")
+        st.link_button(f"Open {source['id']} source", source["source_url"])
+    with st.expander("Investigation Trace"):
+        st.caption("Actual model-requested tools, not private reasoning.")
+        trace = result.get("tool_call_trace", [])
+        if not trace:
+            st.info("No evidence tools were requested.")
+        for call in trace:
+            st.write(f"Round {call['round']} · {call['tool']} · {call['status']}")
+            st.code(call.get("arguments") or "Unavailable", language="json")
+            st.json(call.get("result"))
+
+
 def main():
     st.set_page_config(page_title="FloodSense AI", page_icon="🌧️", layout="wide")
     st.title("FloodSense AI")
     st.write("Agentic Geospatial Flood Risk Intelligence")
     st.caption("LOCATION INVESTIGATION · WEATHER + TERRAIN EVIDENCE")
-    st.warning("Evidence-based screening tool, not an official flood warning system. Follow local authorities for warnings and emergency guidance.")
+    st.warning("FloodSense AI provides preliminary, evidence-based screening, not official flood forecasts or emergency warnings.")
     with st.sidebar:
         st.header("Investigate a location")
         st.caption("Enter WGS84 coordinates in decimal degrees.")
-        with st.form("investigation"):
-            latitude = st.number_input("Latitude", min_value=-90.0, max_value=90.0, value=None, step=0.0001, format="%.4f", placeholder="−90 to 90")
-            longitude = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=None, step=0.0001, format="%.4f", placeholder="−180 to 180")
-            investigate = st.form_submit_button("Investigate Location", type="primary", width="stretch")
+        latitude = st.number_input("Latitude", min_value=-90.0, max_value=90.0, value=None, step=0.0001, format="%.4f", placeholder="−90 to 90")
+        longitude = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=None, step=0.0001, format="%.4f", placeholder="−180 to 180")
+        investigate = st.button("Investigate Location", type="primary", width="stretch")
+        run_ai = st.button("Run AI Investigation", width="stretch")
+        st.caption("AI runs only on click and may use API quota. Selected coordinates and retrieved evidence are sent to the configured provider. The agent retrieves its own evidence separately from the dashboard refresh.")
         st.caption("Each submission requests fresh evidence. Results and failures are retained during ordinary reruns. Submit again to refresh; defer requests if rate limited.")
         st.divider()
         st.markdown("**Sources**\n\n[Open-Meteo](https://open-meteo.com/) · [OpenTopoData](https://www.opentopodata.org/)")
-        st.caption("AI investigation and flood-risk scoring are not implemented at this stage.")
+        st.caption("Gemini is the default AI provider; OpenAI is optional. No flood-risk score is calculated.")
     if investigate:
         try:
             latitude, longitude = validate_coordinates(latitude, longitude)
@@ -123,6 +188,21 @@ def main():
                         # Isolate unexpected service failures without revealing raw errors.
                         result[f"{name}_error"] = f"{name.title()} evidence unavailable due to an unexpected service error."
             st.session_state["investigation_result"] = result
+    if run_ai:
+        try:
+            coordinates = validate_coordinates(latitude, longitude)
+        except ValueError:
+            st.error("Enter valid latitude and longitude before running AI investigation.")
+        else:
+            with st.spinner("AI is investigating weather and terrain evidence…"):
+                try:
+                    from ai.agent import investigate as investigate_ai
+                    ai_result = investigate_ai(*coordinates)
+                except Exception:
+                    # Never expose SDK errors or credentials in Streamlit tracebacks.
+                    ai_result = {"agent_status": "provider_error", "final_report": None,
+                                 "errors": [{"code": "unexpected_error"}]}
+            st.session_state["ai_investigation"] = {"coordinates": coordinates, "result": ai_result}
     result = st.session_state.get("investigation_result")
     if result is None:
         st.info("Choose coordinates in the sidebar and select Investigate Location to retrieve real forecast and elevation evidence.")
@@ -137,6 +217,7 @@ def main():
                     st.subheader(f"{name.title()} evidence")
                     st.error(result[f"{name}_error"])
         show_map(result["latitude"], result["longitude"], result["terrain"])
+    show_ai(latitude, longitude)
     with st.expander("What this evidence can and cannot tell you"):
         st.write("Forecast rainfall and sparse elevation samples support an initial review only. River levels, drainage capacity, soil saturation, tides, and observed flooding are not included. No flood probability, risk score, flood boundary, or safe route is calculated.")
         st.caption("Live source availability and forecast completeness vary. Map tiles require internet access. Check retrieval timestamps before using retained results.")
