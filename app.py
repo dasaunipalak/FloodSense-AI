@@ -133,7 +133,7 @@ def show_ai(latitude, longitude):
                            ("preparedness_considerations", "General preparedness"),
                            ("limitations", "Limitations")):
             st.subheader(label)
-            st.text(report[key])
+            st.markdown(report[key])
     else:
         st.info("No AI report was generated. Any previously loaded dashboard evidence remains above. Agent-retrieved evidence, if any, is listed separately below.")
     st.subheader("Live evidence used by the agent")

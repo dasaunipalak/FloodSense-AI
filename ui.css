@@ -22,7 +22,7 @@ input::placeholder { color: #63756A !important; }
 [data-baseweb="tab-highlight"], [data-testid="stTab"] .react-aria-SelectionIndicator { background-color: #244638 !important; }
 [data-testid="stExpander"] { background: #FFFFFF; color: #26332D; border-radius: 8px; }
 [data-testid="stAlert"] { border-radius: 8px; color: #26332D; background: #EAF0E9; }
-[data-testid="stText"], [data-testid="stText"] span, [data-testid="stText"] p, [data-testid="stText"] pre, [data-testid="stText"] * { color: #26332D !important; white-space: pre-wrap; }
+/* Report body text is rendered via st.markdown(); stMarkdownContainer rule below handles its color. */
 a { color: #356E64; }
 @media (max-width: 700px) {
   [data-testid="stMainBlockContainer"] { padding: 1rem; }
@@ -30,9 +30,11 @@ a { color: #356E64; }
   [role="tablist"] { gap: 0.4rem; overflow-x: auto; }
 }
 /* Keep text readable when the browser inherits Streamlit's dark theme. */
-[data-testid="stMarkdownContainer"], [data-testid="stWidgetLabel"], [data-testid="stMetricLabel"] { color: #26332D; }
+[data-testid="stMarkdownContainer"], [data-testid="stWidgetLabel"], [data-testid="stMetricLabel"] { color: #26332D !important; }
+[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] span { color: #26332D !important; }
 [data-testid="stCaptionContainer"] [data-testid="stMarkdownContainer"] { color: #52645A; }
-.stButton button [data-testid="stMarkdownContainer"] { color: inherit; }
+.stButton button [data-testid="stMarkdownContainer"] { color: inherit !important; }
+.stButton button [data-testid="stMarkdownContainer"] p { color: inherit !important; }
 [data-testid="stAlert"] [data-testid="stAlertContainer"] { background: #EAF0E9; color: #26332D; }
 [data-testid="stAlert"] p { color: #26332D; }
 [data-testid="stMainBlockContainer"] { padding-top: 4rem; }
