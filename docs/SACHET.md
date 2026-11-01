@@ -1,8 +1,10 @@
-# NDMA SACHET official alert evidence (service only)
+# NDMA SACHET official alert evidence and integration
 
-This feature retrieves published official Indian disaster alerts without
-changing the Streamlit dashboard, Gemini tools, evidence-v1 schema, or existing
-weather/terrain calculations. No credentials or paid APIs are required.
+This feature retrieves published official Indian disaster alerts for the
+Streamlit dashboard and the agent's `get_official_alerts` tool. Public SACHET
+retrieval requires no user-supplied key. Gemini investigation separately requires
+provider configuration and may use quota. The weather/terrain calculations and
+combined evidence-v1 schema remain unchanged.
 
 ## Interfaces and attribution
 
@@ -41,6 +43,34 @@ For independent lifecycle/cache control, pass `client=SachetClient()` and reuse
 that client across investigations. The module default client is reused within
 one process. `clear_cache()` explicitly discards its cache. A lock serializes
 fetches sharing a client. This is not a shared/multi-worker rate limiter.
+
+## Dashboard and agent integration
+
+Refresh Official Alerts explicitly calls `fetch_sachet_alerts` for the selected
+coordinates. Initial load and ordinary reruns do not fetch alerts. Snapshots,
+including failures, remain in session state. A coordinate mismatch retains the
+old snapshot and warning but suppresses its verified-local-alert cards in both
+the dashboard and agent evidence panel.
+
+`sachet_ui._sources_fresh` checks all resource `validated_at` timestamps and
+requires provenance for the feed and parsed CAP records. Validation must be
+timezone-aware, not future-dated, and less than 300 seconds old. Missing or invalid
+validation suppresses local cards. Updating `evaluated_at` alone cannot refresh
+source evidence. TTL hits preserve validation time; successful HTTP 304 validation
+advances it without inventing a new retrieval time. This conservative whole-feed
+check can withhold a valid individual alert if another required resource is stale.
+Existing expiry, lifecycle, completeness, and matching checks still apply. Checks
+run on Streamlit reruns, not on a timer; retained views are not live monitoring.
+
+Gemini can autonomously request `get_official_alerts` through the existing native
+function-calling architecture; OpenAI uses the same tool contract. Coordinates,
+execution limits, per-investigation caching, actual execution trace, and canonical
+provenance are preserved. The model receives structured data, including unresolved
+and incomplete statuses, rather than a prewritten warning. The UI distinguishes
+no tool invocation, a request with no usable result, unavailable structured evidence,
+and returned evidence. Unavailable SACHET does not discard weather or terrain.
+Only backend-confirmed active matching sections can support local alert cards;
+unknown geography, incomplete retrieval, and no verified match never imply safety.
 
 ## Response schema 1.0
 
@@ -186,9 +216,9 @@ must be numeric and extra query parameters are rejected. Redirects are never
 followed. XML must be bounded UTF-8, with no DTD or entity declarations; those
 are rejected before ElementTree parsing. Element counts are capped. This
 prevents external entity retrieval and custom entity expansion without a new
-dependency. Treat returned issuer text as untrusted content if a later UI/LLM
-integration is approved: do not execute it, render raw HTML, or treat it as
-application instructions.
+dependency. The UI renders issuer text as text, and the agent instructions treat
+CAP content as untrusted evidence, not application instructions. Prompt constraints
+do not prove every generated sentence is correct; review the evidence and trace.
 
 ## Validation and remaining limits
 
@@ -209,21 +239,22 @@ cache expiry/failures, and matching/mismatch/unresolved outcomes.
 This service has no SLA, numeric published source quota, persisted alert archive,
 or shared Cloud cache. A bounded feed may omit earlier alerts/cancellations;
 `complete_snapshot` does not establish historical completeness. Separate polygons,
-LGD mapping, global geodesic geometry, retry scheduling, and dashboard/agent
-integration require separate review. No live API request is part of automated
+LGD mapping, global geodesic geometry, and retry scheduling remain outside the
+implemented integration. No live API request is part of automated
 tests. Scientific screening limitations and original official issuer authority
 must remain visible; the service does not generate emergency instructions.
 
-## Suggested PR description
+## Verification status
 
-Add isolated NDMA SACHET RSS/CAP evidence service with bounded allowlisted HTTP,
-ETag/TTL caching, safe XML parsing, multilingual provenance, and update/cancel/
-expiry reconciliation. Return schema 1.0 with explicit source availability,
-snapshot completeness, active verified polygon matches, unresolved applicability,
-warnings, and limitations. No district-name/proximity matching or fabricated
-alerts. Add offline fixture tests and service/schema documentation.
+The earlier backend lifecycle diagnosis above is distinct from the later Windows
+UI smoke test: that single bounded retrieval returned `source_unavailable`, with
+no processed alert documents and unresolved applicability. Its transport/XML cause
+remains undiagnosed. The UI handled the failure without breaking weather/terrain;
+this is not successful live end-to-end SACHET verification. Production-host access
+has not been verified. No retry or live request is part of offline validation.
 
-No changes to weather/terrain calculations, evidence-v1, Gemini, or Streamlit.
-Separate polygon downloads and authoritative coordinate-to-LGD mapping remain
-deferred, so many real alerts will remain unresolved. Include actual final test
-counts and validation results when requesting commit/PR approval.
+See [README's Windows harness](../README.md#windows-offline-test-harness) for the
+complete temporary harness command and baseline comparison. Current working files
+have 194 passing tests with that harness, versus 190 passed and four pre-existing
+startup failures with the standard Windows runner. Schema and lifecycle tests do
+not guarantee source uptime, complete geographic coverage, or model correctness.

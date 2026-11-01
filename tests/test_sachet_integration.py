@@ -148,6 +148,11 @@ class OfficialDashboardTests(OfflineTransportCase):
         app.number_input[0].set_value(10.6).run()
         self.assertTrue(any("earlier location" in item.value for item in app.warning))
         self.fetch.assert_called_once()
+        self.assertFalse(any("Verified active local alert" in item.value for item in app.markdown))
+        self.assertEqual(app.session_state["sachet_result"]["coordinates"], (10.5, 70.5))
+        app.number_input[0].set_value(10.5).run()
+        self.assertTrue(any("Verified active local alert" in item.value for item in app.markdown))
+        self.fetch.assert_called_once()
 
     def test_unresolved_incomplete_and_unavailable(self):
         for data, message in ((fixture(polygon=None), "applicability to this location could not be verified"),
@@ -206,3 +211,63 @@ class OfficialDashboardTests(OfflineTransportCase):
         self.assertNotIn("private-sentinel", str([item.value for item in app.warning]))
         app.run()
         self.fetch.assert_called_once()
+
+
+    def test_source_validation_not_reevaluation_controls_freshness(self):
+        data = fixture()
+        data["retrievals"][0]["validated_at"] = (NOW - timedelta(minutes=5)).isoformat()
+        data["evaluated_at"] = NOW.isoformat()
+        self.fetch.return_value = data
+        app = self.refresh(self.app())
+        self.assertFalse(any("Verified active local alert" in item.value for item in app.markdown))
+        self.assertTrue(any("freshness is unknown" in item.value for item in app.warning))
+        app.run()
+        self.fetch.assert_called_once()
+
+    def test_invalid_or_missing_source_validation_fails_closed(self):
+        from sachet_ui import _sources_fresh
+        for value in (None, "", "invalid", "2026-11-01T10:00:00", 123,
+                      (NOW + timedelta(seconds=1)).isoformat(),
+                      (NOW - timedelta(minutes=6)).isoformat()):
+            with self.subTest(value=value):
+                data = fixture()
+                data["retrievals"][1]["validated_at"] = value
+                self.assertFalse(_sources_fresh(data, NOW))
+        data = fixture()
+        del data["retrievals"][0]["validated_at"]
+        self.assertFalse(_sources_fresh(data, NOW))
+        self.fetch.return_value = data
+        app = self.refresh(self.app())
+        self.assertFalse(any("Verified active local alert" in item.value for item in app.markdown))
+        data = fixture()
+        data["retrievals"].pop()
+        self.assertFalse(_sources_fresh(data, NOW))
+        self.assertTrue(_sources_fresh(fixture(), NOW))
+
+    def test_agent_official_fetch_states_and_coordinate_mismatch(self):
+        app = self.app().run()
+        trace = [{"round": 1, "tool": "get_official_alerts", "status": "unavailable"}]
+        cases = [
+            ({}, [], "not invoked"),
+            ({}, trace, "no usable evidence"),
+            ({"official_alerts": {"status": "unavailable", "data": None}}, trace, "no usable evidence"),
+            ({"official_alerts": {"status": "unavailable", "data": fixture(unavailable=True)}}, trace, "source was unavailable"),
+        ]
+        for evidence, calls, message in cases:
+            app.session_state["ai_investigation"] = {"coordinates": (10.5,70.5), "result": {
+                "agent_status": "provider_error", "final_report": None,
+                "evidence": evidence, "tool_call_trace": calls}}
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any(message in item.value for item in list(app.info)+list(app.warning)))
+        app.session_state["ai_investigation"] = {"coordinates": (10.5,70.5), "result": {
+            "agent_status": "provider_error", "final_report": None,
+            "evidence": {"official_alerts": {"status": "available", "data": fixture()}}}}
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertTrue(any("Verified active local alert" in item.value for item in app.markdown))
+        app.number_input[0].set_value(10.6).run()
+        self.assertTrue(any("earlier location" in item.value for item in app.warning))
+        self.assertFalse(any("Verified active local alert" in item.value for item in app.markdown))
+        self.assertEqual(app.session_state["ai_investigation"]["coordinates"], (10.5,70.5))
+        self.fetch.assert_not_called()
