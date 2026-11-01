@@ -4,7 +4,7 @@ A Forge hackathon project for an agentic geospatial flood-risk investigation sys
 
 ## Current stage
 
-The Streamlit dashboard displays live Open-Meteo forecasts, OpenTopoData terrain samples, and an interactive sample map. A separate LLM investigation module under `ai/` selects real evidence tools through Gemini native function calling by default, or OpenAI Responses function calling when explicitly selected. The agent is not integrated into Streamlit yet. Neither component calculates a flood-risk score or official warning.
+The Streamlit dashboard displays live Open-Meteo forecasts, OpenTopoData terrain samples, and an interactive sample map. A separate LLM investigation module under `ai/` selects real evidence tools through Gemini native function calling by default, or OpenAI Responses function calling when explicitly selected. The Streamlit sidebar now includes a separate Run AI Investigation button. Only an explicit click calls the existing agent; results and traces are retained in session state and labeled with their investigated coordinates. Coordinate edits mark older AI results. Provider failures do not discard dashboard evidence. Neither component calculates a flood-risk score or official warning.
 
 FloodSense AI does not provide scientifically validated flood predictions.
 
@@ -59,7 +59,7 @@ DEPLOYMENT.md      Local/Cloud deployment, validation, and operational guidance
 - Keep keys and credentials out of version control.
 - Explain uncertainty and limitations; do not claim scientific validation.
 
-The agent is implemented separately from the dashboard. A controlled live investigation with `gemini-3.1-flash-lite` successfully requested weather and terrain tools, retrieved real evidence, and produced a source-grounded report with a matching trace. This verifies that run, not every future model response.
+The agent remains a separate module, reused by the dashboard and standalone CLI. A controlled live investigation with `gemini-3.1-flash-lite` successfully requested weather and terrain tools, retrieved real evidence, and produced a source-grounded report with a matching trace. This verifies that run, not every future model response.
 
 ## Weather service
 
@@ -455,6 +455,6 @@ raise SystemExit(not result.wasSuccessful())
 '@ | .\.venv\Scripts\python.exe -B -
 ```
 
-Validation: all 125 tests passed with this harness; the standard Windows command
-passed 121 and failed the four AppTest startup cases. No test assertions or
+Validation: all 133 tests passed with this harness; the standard Windows command
+passed 129 and failed the four AppTest startup cases. No test assertions or
 network guards were removed. The portable test-runner issue remains unresolved.
