@@ -1,0 +1,50 @@
+.stApp { background: #F7F8F5; color: #26332D; }
+[data-testid="stHeader"] { background: #F7F8F5; }
+[data-testid="stMainBlockContainer"] { max-width: 1280px; padding-top: 2rem; }
+h1, h2, h3 { color: #244638 !important; letter-spacing: -0.025em; }
+h1 { font-size: 2.5rem !important; }
+h2 { font-size: 1.55rem !important; }
+h3 { font-size: 1.15rem !important; }
+[data-testid="stCaptionContainer"] { color: #52645A !important; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-color: #D5DED4 !important; border-radius: 12px; }
+[data-testid="stNumberInputContainer"] { background: #FFFFFF; color: #26332D; border: 1px solid #BDCBC1; border-radius: 8px; }
+input { color: #26332D !important; }
+input::placeholder { color: #63756A !important; }
+.stButton button { background: #FFFFFF; color: #244638; border: 1px solid #AABEB1; border-radius: 8px; min-height: 2.7rem; }
+.stButton button[kind="primary"] { background: #244638; color: #FFFFFF; border-color: #244638; }
+.stButton button:hover { border-color: #4F8B83; box-shadow: none; }
+.stButton button:focus-visible { outline: 3px solid #4F8B83; outline-offset: 3px; }
+[data-testid="stMetric"] { padding: 0.85rem 1rem; background: #FFFFFF; border: 1px solid #D5DED4; border-radius: 10px; }
+[data-testid="stMetricValue"] { color: #244638; font-size: 1.7rem; }
+[role="tablist"] { border-bottom: 1px solid #CBD8CE; gap: 1rem; }
+[role="tab"] { color: #52645A; }
+[role="tab"][aria-selected="true"] { color: #244638; font-weight: 650; }
+[data-baseweb="tab-highlight"], [data-testid="stTab"] .react-aria-SelectionIndicator { background-color: #244638 !important; }
+[data-testid="stExpander"] { background: #FFFFFF; color: #26332D; border-radius: 8px; }
+[data-testid="stAlert"] { border-radius: 8px; color: #26332D; background: #EAF0E9; }
+/* Report body text is rendered via st.markdown(); stMarkdownContainer rule below handles its color. */
+a { color: #356E64; }
+@media (max-width: 700px) {
+  [data-testid="stMainBlockContainer"] { padding: 1rem; }
+  h1 { font-size: 2rem !important; }
+  [role="tablist"] { gap: 0.4rem; overflow-x: auto; }
+}
+/* Keep text readable when the browser inherits Streamlit's dark theme. */
+[data-testid="stMarkdownContainer"], [data-testid="stWidgetLabel"], [data-testid="stMetricLabel"] { color: #26332D !important; }
+[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] span { color: #26332D !important; }
+[data-testid="stCaptionContainer"] [data-testid="stMarkdownContainer"] { color: #52645A; }
+.stButton button [data-testid="stMarkdownContainer"] { color: inherit !important; }
+.stButton button [data-testid="stMarkdownContainer"] p { color: inherit !important; }
+[data-testid="stAlert"] [data-testid="stAlertContainer"] { background: #EAF0E9; color: #26332D; }
+[data-testid="stAlert"] p { color: #26332D; }
+[data-testid="stMainBlockContainer"] { padding-top: 4rem; }
+[data-testid="stCaptionContainer"] p { color: #52645A !important; }
+
+
+[data-testid="stExpander"] summary { background: #EAF0E9 !important; color: #244638 !important; border-radius: 8px; }
+[data-testid="stExpander"] summary p, [data-testid="stExpander"] summary [data-testid="stIconMaterial"] { color: #244638 !important; }
+
+/* Source-link buttons: white background, forest-green text, visible border. */
+[data-testid="stLinkButton"] a { background: #FFFFFF; color: #244638 !important; border: 1px solid #AABEB1; border-radius: 8px; padding: 0.45rem 1rem; text-decoration: none; font-weight: 500; display: inline-block; }
+[data-testid="stLinkButton"] a:hover { border-color: #4F8B83; color: #244638 !important; }
+[data-testid="stLinkButton"] a:focus-visible { outline: 3px solid #4F8B83; outline-offset: 3px; color: #244638 !important; }

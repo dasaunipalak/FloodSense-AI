@@ -1,5 +1,7 @@
 """Evidence and AI investigation dashboard using the project's real weather and terrain services."""
 
+from pathlib import Path
+
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
@@ -15,9 +17,7 @@ def measurement(value, unit="m"):
     return "Unavailable" if value is None else f"{value:,.2f} {unit}"
 
 
-def show_weather(data):
-    st.subheader("Weather evidence")
-    st.caption(f"Open-Meteo · Retrieved {data['fetched_at']} · Times in UTC")
+def show_weather_totals(data):
     for column, window in zip(st.columns(2), ("24h", "48h")):
         total = data["totals"][window]
         with column:
@@ -25,11 +25,16 @@ def show_weather(data):
             st.caption(f"{total['window_start']} → {total['window_end']}")
             if total["missing_hours"]:
                 st.warning(f"{total['missing_hours']} rainfall hours unavailable; total unavailable.")
+
+
+def show_weather(data):
+    st.subheader("Weather evidence")
+    st.caption(f"Open-Meteo · Retrieved {data['fetched_at']} · Times in UTC")
     st.caption("Windows begin at the next full UTC hour, excluding the current partial hour. Each timestamp marks the end of the preceding hour.")
     hourly = pd.DataFrame(data["hourly"])
     hourly["time"] = pd.to_datetime(hourly["time"], utc=True)
     hourly = hourly.rename(columns={"time": "Hour ending (UTC)", "precipitation": "Rainfall (mm)", "precipitation_probability": "Precipitation probability (%)"})
-    for field, color in (("Rainfall (mm)", "#2589bd"), ("Precipitation probability (%)", "#38a89b")):
+    for field, color in (("Rainfall (mm)", "#4F8B83"), ("Precipitation probability (%)", "#244638")):
         st.write(f"**Hourly {field.lower()}**")
         if hourly[field].notna().any():
             st.bar_chart(hourly, x="Hour ending (UTC)", y=field, color=color)
@@ -47,10 +52,9 @@ def show_weather(data):
 def show_terrain(data):
     st.subheader("Terrain evidence")
     st.caption(f"OpenTopoData · {data['dataset']} · Retrieved {data['fetched_at']}")
-    columns = st.columns(3)
-    columns[0].metric("Selected point elevation", measurement(data["points"][0]["elevation_m"]))
-    columns[1].metric("Center − neighbor mean", measurement(data["center_minus_neighbor_mean_m"]))
-    columns[2].metric("Five-point elevation range", measurement(data["sample_elevation_range_m"]))
+    columns = st.columns(2)
+    columns[0].metric("Center − neighbor mean", measurement(data["center_minus_neighbor_mean_m"]))
+    columns[1].metric("Five-point elevation range", measurement(data["sample_elevation_range_m"]))
     differences = {row["label"]: row["neighbor_minus_center_m"] for row in data["relative_elevation"]}
     rows = [{
         "Sample": point["label"].title(), "Latitude": point["latitude"],
@@ -129,7 +133,7 @@ def show_ai(latitude, longitude):
                            ("preparedness_considerations", "General preparedness"),
                            ("limitations", "Limitations")):
             st.subheader(label)
-            st.text(report[key])
+            st.markdown(report[key])
     else:
         st.info("No AI report was generated. Any previously loaded dashboard evidence remains above. Agent-retrieved evidence, if any, is listed separately below.")
     st.subheader("Live evidence used by the agent")
@@ -143,9 +147,14 @@ def show_ai(latitude, longitude):
     official = result.get("evidence", {}).get("official_alerts")
     with st.expander("Official alert evidence used by the AI"):
         if official and official.get("data") is not None:
-            show_sachet(official["data"])
+            if official.get("status") == "unavailable":
+                st.warning("Official-alert retrieval was attempted but the source was unavailable. No verified alert evidence was established.")
+            show_sachet(official["data"], allow_local_cards=(latitude, longitude) == (lat, lon))
+        elif official is not None or any(call.get("tool") == "get_official_alerts"
+                                        for call in result.get("tool_call_trace", [])):
+            st.warning("An official-alert tool request was recorded, but no usable evidence was returned. Retrieval failed, was unavailable, or could not execute; inspect the trace.")
         else:
-            st.info("Official alerts were not retrieved by this investigation.")
+            st.info("The official-alert tool was not invoked by this investigation.")
     for source in result.get("evidence_source_references", []):
         st.write(f"{source['source']} · Retrieved {source['fetched_at']}")
         st.link_button(f"Open {source['id']} source", source["source_url"])
@@ -162,23 +171,29 @@ def show_ai(latitude, longitude):
 
 def main():
     st.set_page_config(page_title="FloodSense AI", page_icon="🌧️", layout="wide")
+    st.markdown("<style>" + Path(__file__).with_name("ui.css").read_text(encoding="utf-8") + "</style>", unsafe_allow_html=True)
+    st.caption("FLOODSENSE / ENVIRONMENTAL INTELLIGENCE")
     st.title("FloodSense AI")
-    st.write("Agentic Geospatial Flood Risk Intelligence")
-    st.caption("LOCATION INVESTIGATION · WEATHER + TERRAIN EVIDENCE")
+    st.write("Geospatial evidence for flood preparedness")
+    st.caption("Explore real forecasts, local terrain, and official alerts. Investigate the evidence with an autonomous AI agent.")
     st.warning("FloodSense AI provides preliminary, evidence-based screening, not official flood forecasts or emergency warnings.")
-    with st.sidebar:
-        st.header("Investigate a location")
-        st.caption("Enter WGS84 coordinates in decimal degrees.")
-        latitude = st.number_input("Latitude", min_value=-90.0, max_value=90.0, value=None, step=0.0001, format="%.4f", placeholder="−90 to 90")
-        longitude = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=None, step=0.0001, format="%.4f", placeholder="−180 to 180")
-        investigate = st.button("Investigate Location", type="primary", width="stretch")
-        run_ai = st.button("Run AI Investigation", width="stretch")
-        refresh_alerts = st.button("Refresh Official Alerts", width="stretch")
-        st.caption("AI runs only on click and may use API quota. Selected coordinates and retrieved evidence are sent to the configured provider. The agent retrieves its own evidence separately from the dashboard refresh.")
-        st.caption("Each submission requests fresh evidence. Results and failures are retained during ordinary reruns. Submit again to refresh; defer requests if rate limited.")
-        st.divider()
-        st.markdown("**Sources**\n\n[Open-Meteo](https://open-meteo.com/) · [OpenTopoData](https://www.opentopodata.org/)")
-        st.caption("Gemini is the default AI provider; OpenAI is optional. No flood-risk score is calculated.")
+    with st.container(border=True):
+        st.subheader("Explore a location")
+        st.caption("WGS84 coordinates · decimal degrees")
+        lat_col, lon_col = st.columns(2)
+        with lat_col:
+            latitude = st.number_input("Latitude", min_value=-90.0, max_value=90.0, value=None, step=0.0001, format="%.4f", placeholder="−90 to 90")
+        with lon_col:
+            longitude = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=None, step=0.0001, format="%.4f", placeholder="−180 to 180")
+        evidence_action, ai_action, alert_action = st.columns(3)
+        with evidence_action:
+            investigate = st.button("Investigate Location", width="stretch")
+        with ai_action:
+            run_ai = st.button("Run AI Investigation", type="primary", width="stretch")
+        with alert_action:
+            refresh_alerts = st.button("Refresh Official Alerts", width="stretch")
+        st.caption("Each action runs only on click. Weather / terrain, official alerts, and AI refresh independently; ordinary reruns retain results.")
+    st.caption("AI uses provider quota and sends the selected coordinates and retrieved evidence to the configured provider. Gemini is the default; OpenAI is optional.")
     if investigate:
         try:
             latitude, longitude = validate_coordinates(latitude, longitude)
@@ -213,22 +228,6 @@ def main():
                     ai_result = {"agent_status": "provider_error", "final_report": None,
                                  "errors": [{"code": "unexpected_error"}]}
             st.session_state["ai_investigation"] = {"coordinates": coordinates, "result": ai_result}
-    result = st.session_state.get("investigation_result")
-    if result is None:
-        st.info("Choose coordinates in the sidebar and select Investigate Location to retrieve real forecast and elevation evidence.")
-    else:
-        st.subheader(f"Evidence for {result['latitude']:.4f}, {result['longitude']:.4f}")
-        st.caption("Showing the last submitted location. Editing sidebar inputs does not refresh these results.")
-        for name, renderer in (("weather", show_weather), ("terrain", show_terrain)):
-            with st.container(border=True):
-                if result[name] is not None:
-                    renderer(result[name])
-                else:
-                    st.subheader(f"{name.title()} evidence")
-                    st.error(result[f"{name}_error"])
-        show_map(result["latitude"], result["longitude"], result["terrain"])
-    st.header("Official Disaster Alerts")
-    st.caption("NDMA SACHET distributes issuer-provided alerts for India. Geographic coverage is verified only through supported inline polygons, never district names or LGD codes alone.")
     if refresh_alerts:
         try:
             alert_coordinates = validate_coordinates(latitude, longitude)
@@ -241,19 +240,76 @@ def main():
                 except Exception:
                     alert_data = None
             st.session_state["sachet_result"] = {"coordinates": alert_coordinates, "data": alert_data}
+    result = st.session_state.get("investigation_result")
     saved_alerts = st.session_state.get("sachet_result")
-    if saved_alerts is None:
-        st.info("Select Refresh Official Alerts to retrieve SACHET evidence. No alerts have been checked in this dashboard session.")
-    else:
-        alert_lat, alert_lon = saved_alerts["coordinates"]
-        st.subheader(f"Official alert snapshot for {alert_lat:.4f}, {alert_lon:.4f}")
-        if (latitude, longitude) != (alert_lat, alert_lon):
-            st.warning("Previous official alert snapshot belongs to an earlier location, not the selected coordinates.")
-        if saved_alerts["data"] is None:
-            st.warning("Official alert source unavailable. Other dashboard evidence remains independent. No automatic retry was made.")
+    weather = result["weather"] if result else None
+    terrain = result["terrain"] if result else None
+    if result:
+        st.subheader(f"Evidence for {result['latitude']:.4f}, {result['longitude']:.4f}")
+        st.caption("Showing the last submitted location. Editing location inputs does not refresh these results.")
+        if (latitude, longitude) != (result["latitude"], result["longitude"]):
+            st.warning("Weather and terrain belong to the previous location shown above; refresh to investigate the selected coordinates.")
+    if weather is not None or terrain is not None:
+        rain_summary, elevation_summary, alert_summary = st.columns([2, 1, 1])
+        with rain_summary:
+            if weather is not None:
+                show_weather_totals(weather)
+            else:
+                st.caption("24h / 48h rainfall: Unavailable")
+        with elevation_summary:
+            st.metric("Selected point elevation", measurement(terrain["points"][0]["elevation_m"]) if terrain else "Unavailable")
+        with alert_summary:
+            status = "Not checked"
+            if saved_alerts:
+                if saved_alerts["coordinates"] != (latitude, longitude):
+                    status = "Earlier location"
+                else:
+                    status = saved_alerts["data"]["retrieval_status"].title() if saved_alerts["data"] else "Unavailable"
+            st.metric("Official-alert source", status)
+            st.caption("Retrieval status, not a safety assessment. See Official Alerts for snapshot age and applicability.")
+    overview, details, alerts, ai_panel = st.tabs(["Overview", "Weather & Terrain", "Official Alerts", "AI Investigation"])
+    with overview:
+        if result is None:
+            st.info("Enter coordinates → Load evidence → Explore results")
         else:
-            show_sachet(saved_alerts["data"])
-    show_ai(latitude, longitude)
+            map_column, weather_column = st.columns([1, 1])
+            with map_column:
+                show_map(result["latitude"], result["longitude"], terrain)
+            with weather_column:
+                if weather is not None:
+                    show_weather(weather)
+                else:
+                    st.subheader("Weather evidence")
+                    st.error(result["weather_error"])
+        st.caption("Want an evidence-based explanation? Select Run AI Investigation above, then open AI Investigation for findings, sources, and the actual tool trace.")
+    with details:
+        st.caption("Hourly forecast charts and weather provenance are in Overview. Inspect the five terrain samples and their measurement limits here.")
+        if terrain is not None:
+            show_terrain(terrain)
+        elif result:
+            st.subheader("Terrain evidence")
+            st.error(result["terrain_error"])
+        else:
+            st.info("Terrain evidence has not been requested in this session.")
+    with alerts:
+        st.header("Official Disaster Alerts")
+        st.caption("NDMA SACHET distributes issuer-provided alerts for India. Geographic coverage is verified only through supported inline polygons, never district names or LGD codes alone.")
+        saved_alerts = st.session_state.get("sachet_result")
+        if saved_alerts is None:
+            st.info("Select Refresh Official Alerts to retrieve SACHET evidence. No alerts have been checked in this dashboard session.")
+        else:
+            alert_lat, alert_lon = saved_alerts["coordinates"]
+            st.subheader(f"Official alert snapshot for {alert_lat:.4f}, {alert_lon:.4f}")
+            if (latitude, longitude) != (alert_lat, alert_lon):
+                st.warning("Previous official alert snapshot belongs to an earlier location, not the selected coordinates.")
+            if saved_alerts["data"] is None:
+                st.warning("Official alert source unavailable. Other dashboard evidence remains independent. No automatic retry was made.")
+            else:
+                show_sachet(saved_alerts["data"], allow_local_cards=(latitude, longitude) == (alert_lat, alert_lon))
+    with ai_panel:
+        st.caption("AUTONOMOUS EVIDENCE INVESTIGATION")
+        st.write("Gemini independently selects weather, terrain, and official-alert tools. Review its interpretation alongside the evidence, source timestamps, and limitations.")
+        show_ai(latitude, longitude)
     with st.expander("What this evidence can and cannot tell you"):
         st.write("Forecast rainfall and sparse elevation samples support an initial review only. River levels, drainage capacity, soil saturation, tides, and observed flooding are not included. No flood probability, risk score, flood boundary, or safe route is calculated.")
         st.caption("Live source availability and forecast completeness vary. Map tiles require internet access. Check retrieval timestamps before using retained results.")

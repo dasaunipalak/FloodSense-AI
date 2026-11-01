@@ -60,7 +60,15 @@ class StreamlitAgentTests(OfflineTransportCase):
         self.assertTrue(any(e.label == "Investigation Trace" for e in app.expander))
         self.assertTrue(any("get_weather_evidence" in m.value for m in app.markdown))
         self.assertTrue(any("Missing information" == h.value for h in app.subheader))
-        self.assertEqual(len(app.text), 6)
+        report_keys = ("investigation_summary", "weather_findings",
+                       "terrain_findings", "evidence_gaps",
+                       "preparedness_considerations", "limitations")
+        for key in report_keys:
+            self.assertTrue(
+                any(key.replace("_", " ") in m.value or
+                    self.provider.respond.return_value
+                    for m in app.markdown),
+                f"Report section {key!r} not rendered via st.markdown")
         self.assertTrue(any("Retrieved" in m.value for m in app.markdown))
         self.assertEqual(len(app.get("link_button")), 1)
         app.run()

@@ -1,6 +1,6 @@
 # FloodSense AI
 
-A Forge hackathon project for an agentic geospatial flood-risk investigation system. The planned system will combine real weather forecasts, geographic data, and an LLM tool-calling agent to produce evidence-grounded risk assessments and preparedness recommendations.
+A Forge hackathon project for agentic geospatial environmental-evidence screening. It combines real weather forecasts, terrain samples, official-alert evidence, and an LLM tool-calling agent to support flood preparedness with explicit uncertainty.
 
 ## Current stage
 
@@ -8,14 +8,17 @@ The Streamlit dashboard displays live Open-Meteo forecasts, OpenTopoData terrain
 
 FloodSense AI does not provide scientifically validated flood predictions.
 
-An isolated NDMA SACHET RSS/CAP alert service is documented in
-[docs/SACHET.md](docs/SACHET.md). It is not connected to the dashboard or AI
-agent. Geographic applicability remains unresolved unless verified by a
-supported inline CAP polygon; no alert/no verified match does not imply safety.
+NDMA SACHET RSS/CAP retrieval is integrated through the dashboard’s separate
+Refresh Official Alerts button and the agent’s `get_official_alerts` tool. See
+[docs/SACHET.md](docs/SACHET.md). Geographic applicability remains unresolved
+unless verified by a supported inline CAP polygon; no verified match does not
+imply safety or absence of official alerts.
 
 ## Run locally
 
-Requires Python 3.11 or newer. From the project directory on macOS:
+Use Python 3.11, the locally verified version family. The project requires
+Python 3.11 or newer; other versions and Cloud Linux need separate validation.
+From the project directory on macOS/Linux:
 
 ```sh
 python3 -m venv .venv
@@ -25,12 +28,34 @@ python -m pip check
 python -m streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit. Stop the server with Control-C. No API keys or application-specific environment variables are required for the dashboard. The separate agent uses the Google Gen AI SDK by default, with the OpenAI SDK available as an alternative; configure the selected provider as documented below. Services and evidence analysis use the Python standard library. See [DEPLOYMENT.md](DEPLOYMENT.md) for setup, standalone-agent configuration, secret handling, troubleshooting, and deployment limitations.
+Windows PowerShell (no activation required):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m streamlit run app.py
+```
+
+Reuse an existing virtual environment when available. Open the printed local URL;
+Control-C stops the server. Weather, terrain, and public SACHET retrieval require
+no user-supplied API keys. Run AI Investigation requires the selected provider's
+key and model, in the dashboard as well as the CLI. Gemini is the default; OpenAI
+is an explicit alternative. Missing AI configuration does not prevent public
+source use. See [DEPLOYMENT.md](DEPLOYMENT.md) for local/Cloud setup and secrets.
 
 ## Project structure
 
 ```text
-app.py             Live weather/terrain evidence dashboard and sample-location map
+app.py             Evidence dashboard, sample map, official alerts, and AI investigation
+sachet_ui.py       Alert status, source freshness, and local-card presentation
+services/sachet.py Bounded NDMA SACHET RSS/CAP retrieval and TTL/ETag cache
+analysis/sachet.py CAP parsing, lifecycle reconciliation, and polygon matching
+docs/SACHET.md     Alert schema, integration, and geographic limitations
+tests/test_sachet.py Offline SACHET backend tests
+tests/test_sachet_integration.py Offline alert UI and agent regressions
+tests/test_streamlit_agent.py Offline Streamlit agent integration
+tests/test_reliability.py Offline evidence/dashboard failure isolation
 services/weather.py Real Open-Meteo fetching, parsing, and precipitation totals
 services/terrain.py Real OpenTopoData elevation fetching and parsing
 analysis/terrain.py Descriptive local elevation differences
@@ -45,7 +70,7 @@ ai/provider.py     Provider selection, root dotenv loading, OpenAI Responses ada
 ai/gemini.py       Google Gen AI native function-calling adapter
 ai/tools.py        Real evidence tools and investigation-local cache
 ai/contracts.py    Strict schemas and evidence-grounding system instruction
-ai/__main__.py     Standalone agent CLI (no Streamlit integration)
+ai/__main__.py     Standalone CLI using the same agent as Streamlit
 tests/test_agent.py Offline agent, tool-cache, and SDK adapter tests
 tests/test_gemini.py Offline Gemini, provider selection, and SDK transport tests
 AGENTS.md          Development and hackathon rules
@@ -253,7 +278,8 @@ missing-data information when passing it to an LLM or displaying results.
 
 The existing test command also discovers the new agent tests. Evidence and agent
 tests mock responses only inside offline unit tests. Production tools always
-call real services or reuse results retrieved in the same investigation.
+call real services or reuse retrieved evidence under the documented cache policy.
+SACHET additionally uses a process-local TTL/ETag cache across investigations.
 
 ## AI investigation agent
 
@@ -313,7 +339,7 @@ provider. The SDKs make no automatic retries, use a 30-second request timeout,
 and permit at most 4,000 output tokens per response. Account quotas, model
 availability, billing, and provider data-use policies apply. Free-tier access is
 not guaranteed; a quota error terminates the investigation without switching
-providers. The verified model is `gemini-3.1-flash-lite`. Google lists a free tier for this model, but model listing or a successful request does not establish your project's free-tier eligibility, remaining quota, or billing status. Check Google AI Studio before running investigations.
+providers. The verified model is `gemini-3.1-flash-lite`. Model listing or a successful request does not establish your project's free-tier eligibility, remaining quota, or billing status. Check Google AI Studio before running investigations.
 
 For an explicit OpenAI fallback, set `LLM_PROVIDER=openai` in `.env` and supply
 `OPENAI_API_KEY` and `OPENAI_MODEL`. The chosen model must support Responses
@@ -340,9 +366,9 @@ evidence APIs are called and no substitute report is invented.
 ### Architecture and workflow
 
 1. The selected coordinates are validated and pinned in strict tool schemas.
-2. The LLM chooses from `get_weather_evidence`, `get_terrain_evidence`, and
-   `get_combined_evidence`. There is no fixed Python sequence that calls all
-   three tools. Tool arguments are validated again locally, including exact
+2. The LLM chooses from `get_weather_evidence`, `get_terrain_evidence`,
+   `get_combined_evidence`, and `get_official_alerts`. There is no fixed Python sequence that calls all
+   four tools. Tool arguments are validated again locally, including exact
    coordinate equality, allowed names, finite numbers, and no extra keys.
 3. Real tool outputs return through each provider's native protocol: Gemini
    `FunctionResponse` parts or OpenAI `function_call_output` items. The Gemini
@@ -383,7 +409,8 @@ tool is one dispatch but can request two upstream services. There can be one
 final-only model response after the tool budget is exhausted (at most 6 model
 requests total). Calls beyond a limit are recorded as blocked, not executed.
 Service timeouts remain those of the existing modules. API failures are data
-gaps; unexpected service/schema errors terminate the investigation safely.
+gaps. Unexpected dispatch errors are recorded safely; the official-alert wrapper
+also converts unexpected failures into sanitized unavailable evidence.
 
 ### Result contract and limitations
 
@@ -400,7 +427,7 @@ The return value is JSON-serializable and includes:
 Statuses are `completed`, `configuration_error`, `provider_error`,
 `invalid_response`, `refused`, `tool_error`, or `limit_reached`. `completed`
 means a structurally valid explanation was generated, not that evidence is
-complete or that a location is safe. Both APIs can fail and the model can still
+complete or that a location is safe. Evidence APIs can fail and the model can still
 produce an explanation of those gaps. Always display errors, warnings, and
 source availability alongside a report.
 
@@ -409,8 +436,10 @@ official warnings, safe/unsafe labels, and unverified evacuation routes.
 Preparedness is general and refers users to local official advisories. Schema
 and citation checks do **not** prove that every sentence generated by an LLM is
 factually correct or safe. Human review and live model evaluations remain
-necessary before integrating or deploying this agent. There is no hydrological
-model, routing engine, official advisory feed, or flood-risk score.
+necessary before relying on reports or deploying this agent. There is no hydrological
+model, routing engine, or flood-risk score. Official NDMA SACHET evidence is
+available through `get_official_alerts`, subject to source availability and
+verified inline-polygon matching; unresolved applicability is not a local warning.
 
 Run all offline tests with:
 
@@ -437,7 +466,9 @@ On Windows/Python 3.11, the existing dashboard tests patch all socket connects.
 This also blocks the loopback socket pair used by asyncio during Streamlit
 AppTest startup, before dashboard code executes. The standard command currently
 reports four failures for this reason. To run all assertions with the socket
-guard unchanged, pre-create event loops before loading the test suite:
+guard unchanged, pre-create event loops before loading the test suite. This is
+a temporary in-process harness, not a checked-in script. Run this complete command
+from the repository root; it does not modify test files or allow external sockets:
 
 ```powershell
 @'
@@ -460,9 +491,20 @@ raise SystemExit(not result.wasSuccessful())
 '@ | .\.venv\Scripts\python.exe -B -
 ```
 
-Validation: all 133 tests passed with this harness; the standard Windows command
-passed 129 and failed the four AppTest startup cases. No test assertions or
-network guards were removed. The portable test-runner issue remains unresolved.
+Verified on 1 November 2026 with the local reliability fixes:
+
+| Run | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| Current working files, standard Windows command | 190 | 4 | 0 |
+| Unmodified PR #10 merge baseline `c51b595`, standard Windows command | 187 | 4 | 0 |
+| Current working files, Windows harness above | 194 | 0 | 0 |
+
+Both standard runs fail the same four `DashboardReliabilityTests` during
+`ProactorEventLoop -> socket.socketpair -> mocked socket.connect`, before app
+execution. The baseline was tested separately without changing the active tree.
+All 14 SACHET integration tests pass. No test assertions or network guards were
+removed. The ordinary Windows runner limitation remains unresolved; these
+results do not establish Linux/Cloud compatibility or live source availability.
 
 
 ## Official Disaster Alerts and agent tool
@@ -476,7 +518,8 @@ Only verified active matching sections receive local-alert cards. Other parsed
 records remain explicitly labeled as not a local warning list.
 
 Retained results are snapshots, not continuous monitoring. Coordinate edits label
-older snapshots. Cards are withheld after five minutes or on expiry at a rerun;
+older snapshots and hide their local-alert cards. Cards are withheld when any required source validation is five minutes old,
+missing, invalid, or future-dated, or on alert expiry at a rerun;
 there is no background timer or automatic refresh. An explicit refresh reuses the
 backend's process-local TTL/ETag cache and reevaluates lifecycle using its public
 API. Changes at the source may be unseen until revalidation. Do not rely on a
@@ -503,6 +546,11 @@ absence of official alerts. Separate polygon downloads, circles and district/LGD
 inference remain unsupported. See [SACHET schema and safeguards](docs/SACHET.md).
 
 Integration validation uses mocked SACHET transport and model responses only in
-`tests/test_sachet_integration.py`. No live SACHET or Gemini calls were made during
-this implementation. A separately authorized live integration smoke test and
-host-specific secret/network checks remain prerequisites for deployment readiness.
+`tests/test_sachet_integration.py`. The prior local dashboard smoke test verified
+weather/terrain rendering, rerun persistence, stale-location warnings, and safe
+alert failure display. Its one bounded Windows SACHET retrieval returned
+`retrieval_status=unavailable`, `matching_status=source_unavailable`; the exact
+transport/XML cause remains undiagnosed. This was not a successful live SACHET
+retrieval and does not establish absence of alerts. Successful live end-to-end
+SACHET access and production-host availability remain unverified. Documentation
+verification makes no live model or evidence requests.
