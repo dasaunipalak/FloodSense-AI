@@ -463,3 +463,46 @@ raise SystemExit(not result.wasSuccessful())
 Validation: all 133 tests passed with this harness; the standard Windows command
 passed 129 and failed the four AppTest startup cases. No test assertions or
 network guards were removed. The portable test-runner issue remains unresolved.
+
+
+## Official Disaster Alerts and agent tool
+
+The dashboard's **Refresh Official Alerts** button retrieves the existing NDMA
+SACHET service for the selected coordinates. It is independent of weather/terrain
+refresh and AI investigation; initial load and ordinary reruns do not fetch alerts.
+Availability, matching status, evaluation time, issuer, event, severity, effective/
+expiry timestamps, source links, warnings and geographic limitations are displayed.
+Only verified active matching sections receive local-alert cards. Other parsed
+records remain explicitly labeled as not a local warning list.
+
+Retained results are snapshots, not continuous monitoring. Coordinate edits label
+older snapshots. Cards are withheld after five minutes or on expiry at a rerun;
+there is no background timer or automatic refresh. An explicit refresh reuses the
+backend's process-local TTL/ETag cache and reevaluates lifecycle using its public
+API. Changes at the source may be unseen until revalidation. Do not rely on a
+retained dashboard or AI report for current emergency decisions.
+
+The provider-neutral `get_official_alerts` tool uses the same pinned coordinates,
+validation, per-investigation cache (including failures), trace and execution limits
+as existing tools. Gemini and OpenAI receive the declaration through their existing
+adapters. The model chooses whether to request it; no tool sequence is hardcoded.
+The original weather/terrain combined-evidence contract remains unchanged.
+
+SACHET data is returned as structured evidence with its original matching and
+retrieval statuses, coverage, warnings and limitations. Each successfully retrieved
+resource gets a canonical source ID/link and original retrieval/validation/evaluation
+timestamps. Evaluation time is never presented as retrieval time. The existing
+report schema is retained: official-alert findings belong in the investigation
+summary and uncertainty in evidence gaps. The UI also exposes the exact official
+alert evidence used by the AI. Prompts constrain interpretation but cannot prove
+all model prose is correct; source checks and human review remain necessary.
+
+Unresolved geographic/lifecycle/validity states and incomplete/unavailable sources
+must not become local warnings. No verified match is not evidence of safety or
+absence of official alerts. Separate polygon downloads, circles and district/LGD
+inference remain unsupported. See [SACHET schema and safeguards](docs/SACHET.md).
+
+Integration validation uses mocked SACHET transport and model responses only in
+`tests/test_sachet_integration.py`. No live SACHET or Gemini calls were made during
+this implementation. A separately authorized live integration smoke test and
+host-specific secret/network checks remain prerequisites for deployment readiness.

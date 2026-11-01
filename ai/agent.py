@@ -9,7 +9,7 @@ from ai.tools import EvidenceTools
 
 MAX_TOOL_ROUNDS = 5
 MAX_TOOL_EXECUTIONS = 6
-DEFAULT_TASK = "Investigate the available weather and terrain evidence and its gaps for this location."
+DEFAULT_TASK = "Investigate the available weather, terrain and official alert evidence and its gaps for this location."
 DISCLAIMER = "Evidence-based screening only; not a validated flood prediction or official flood warning system."
 
 
@@ -108,7 +108,7 @@ def investigate(latitude, longitude, *, task=DEFAULT_TASK, provider=None):
         result["evidence"] = evidence.cache
         if code:
             result["errors"].append({"code": code, "message": message, **(diagnostics or {})})
-        for kind in ("weather", "terrain"):
+        for kind in ("weather", "terrain", "official_alerts"):
             entry = evidence.cache.get(kind)
             if entry is None:
                 result["warnings"].append(f"{kind.title()} evidence was not retrieved.")
