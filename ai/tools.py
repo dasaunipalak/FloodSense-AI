@@ -9,6 +9,7 @@ from services.weather import API_URL as WEATHER_URL
 from services.weather import WeatherError, fetch_weather, validate_coordinates
 from services.terrain import API_URL as TERRAIN_URL
 from services.terrain import TerrainError, fetch_terrain
+from services.sachet import fetch_sachet_alerts, RSS_URL as SACHET_URL
 from ai.contracts import TOOL_NAMES, strict_json
 
 
@@ -103,6 +104,25 @@ class EvidenceTools:
         self._check_location(latitude, longitude)
         return deepcopy(self._individual("terrain"))
 
+    def get_official_alerts(self, latitude, longitude):
+        self._check_location(latitude, longitude)
+        if "official_alerts" not in self.cache:
+            entry = {"source": "NDMA SACHET", "endpoint_url": SACHET_URL,
+                     "status": "unavailable", "data": None, "error": None,
+                     "warnings": [], "limitations": []}
+            try:
+                data = fetch_sachet_alerts(*self.coordinates)
+                if data["retrieval_status"] not in ("available", "partial", "unavailable"):
+                    raise ValueError("Invalid SACHET availability")
+                json.dumps(data, allow_nan=False)
+                entry.update(status=data["retrieval_status"], data=data,
+                             warnings=data["warnings"], limitations=data["limitations"])
+            except Exception:
+                entry["error"] = {"type": "SachetUnavailable",
+                                  "message": "Official alert evidence could not be retrieved."}
+            self.cache["official_alerts"] = entry
+        return deepcopy(self.cache["official_alerts"])
+
     def _check_location(self, latitude, longitude):
         if _validated_coordinates(latitude, longitude) != self.coordinates:
             raise ValueError("Tool coordinates must match the user's selected location.")
@@ -135,7 +155,7 @@ class EvidenceTools:
                         ("latitude", "longitude"), self.coordinates)),
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                     "status": status, "weather": weather, "terrain": terrain,
-                    "warnings": [{"source": kind, **warning} for kind, entry in self.cache.items()
+                    "warnings": [{"source": kind, **warning} for kind, entry in ((k, self.cache[k]) for k in ("weather", "terrain"))
                                  for warning in entry["warnings"]],
                     "limitations": list(LIMITATIONS),
                 }
@@ -145,6 +165,16 @@ class EvidenceTools:
         references = []
         for kind, entry in self.cache.items():
             data = entry["data"]
+            if kind == "official_alerts":
+                if data is not None:
+                    for index, resource in enumerate(data["retrievals"]):
+                        references.append({"id": f"official_alerts_{index}", "source": data["source"],
+                            "source_url": resource["source_url"],
+                            "documentation_url": data["integration_guide_url"],
+                            "fetched_at": resource["retrieved_at"],
+                            "validated_at": resource["validated_at"],
+                            "evaluated_at": data["evaluated_at"], "status": entry["status"]})
+                continue
             if data is not None:
                 references.append({"id": kind, "source": data["source"],
                                    "source_url": data["source_url"],
@@ -155,8 +185,12 @@ class EvidenceTools:
 
     def execute(self, name, arguments):
         args = self.validate(name, arguments)
-        needed = ("weather", "terrain") if name == TOOL_NAMES[2] else (
-            "weather" if name == TOOL_NAMES[0] else "terrain",)
+        needed = {
+            "get_weather_evidence": ("weather",),
+            "get_terrain_evidence": ("terrain",),
+            "get_combined_evidence": ("weather", "terrain"),
+            "get_official_alerts": ("official_alerts",),
+        }[name]
         reused = [kind for kind in needed if kind in self.cache]
         data = getattr(self, name)(**args)  # name has been restricted to TOOL_NAMES
         return {"status": data["status"], "evidence": data,

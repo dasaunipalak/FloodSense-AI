@@ -4,6 +4,9 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
+from services.sachet import fetch_sachet_alerts
+from sachet_ui import show_sachet
+
 from services.weather import WeatherError, fetch_weather, validate_coordinates
 from services.terrain import TerrainError, TerrainRateLimitError, fetch_terrain
 
@@ -137,6 +140,12 @@ def show_ai(latitude, longitude):
         if entry:
             with st.expander(f"Agent {name} evidence"):
                 st.json(entry)
+    official = result.get("evidence", {}).get("official_alerts")
+    with st.expander("Official alert evidence used by the AI"):
+        if official and official.get("data") is not None:
+            show_sachet(official["data"])
+        else:
+            st.info("Official alerts were not retrieved by this investigation.")
     for source in result.get("evidence_source_references", []):
         st.write(f"{source['source']} · Retrieved {source['fetched_at']}")
         st.link_button(f"Open {source['id']} source", source["source_url"])
@@ -164,6 +173,7 @@ def main():
         longitude = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=None, step=0.0001, format="%.4f", placeholder="−180 to 180")
         investigate = st.button("Investigate Location", type="primary", width="stretch")
         run_ai = st.button("Run AI Investigation", width="stretch")
+        refresh_alerts = st.button("Refresh Official Alerts", width="stretch")
         st.caption("AI runs only on click and may use API quota. Selected coordinates and retrieved evidence are sent to the configured provider. The agent retrieves its own evidence separately from the dashboard refresh.")
         st.caption("Each submission requests fresh evidence. Results and failures are retained during ordinary reruns. Submit again to refresh; defer requests if rate limited.")
         st.divider()
@@ -217,6 +227,32 @@ def main():
                     st.subheader(f"{name.title()} evidence")
                     st.error(result[f"{name}_error"])
         show_map(result["latitude"], result["longitude"], result["terrain"])
+    st.header("Official Disaster Alerts")
+    st.caption("NDMA SACHET distributes issuer-provided alerts for India. Geographic coverage is verified only through supported inline polygons, never district names or LGD codes alone.")
+    if refresh_alerts:
+        try:
+            alert_coordinates = validate_coordinates(latitude, longitude)
+        except ValueError:
+            st.error("Enter valid latitude and longitude before retrieving official alerts.")
+        else:
+            with st.spinner("Retrieving official alert evidence…"):
+                try:
+                    alert_data = fetch_sachet_alerts(*alert_coordinates)
+                except Exception:
+                    alert_data = None
+            st.session_state["sachet_result"] = {"coordinates": alert_coordinates, "data": alert_data}
+    saved_alerts = st.session_state.get("sachet_result")
+    if saved_alerts is None:
+        st.info("Select Refresh Official Alerts to retrieve SACHET evidence. No alerts have been checked in this dashboard session.")
+    else:
+        alert_lat, alert_lon = saved_alerts["coordinates"]
+        st.subheader(f"Official alert snapshot for {alert_lat:.4f}, {alert_lon:.4f}")
+        if (latitude, longitude) != (alert_lat, alert_lon):
+            st.warning("Previous official alert snapshot belongs to an earlier location, not the selected coordinates.")
+        if saved_alerts["data"] is None:
+            st.warning("Official alert source unavailable. Other dashboard evidence remains independent. No automatic retry was made.")
+        else:
+            show_sachet(saved_alerts["data"])
     show_ai(latitude, longitude)
     with st.expander("What this evidence can and cannot tell you"):
         st.write("Forecast rainfall and sparse elevation samples support an initial review only. River levels, drainage capacity, soil saturation, tides, and observed flooding are not included. No flood probability, risk score, flood boundary, or safe route is calculated.")
