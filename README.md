@@ -8,6 +8,11 @@ The Streamlit dashboard displays live Open-Meteo forecasts, OpenTopoData terrain
 
 FloodSense AI does not provide scientifically validated flood predictions.
 
+An isolated NDMA SACHET RSS/CAP alert service is documented in
+[docs/SACHET.md](docs/SACHET.md). It is not connected to the dashboard or AI
+agent. Geographic applicability remains unresolved unless verified by a
+supported inline CAP polygon; no alert/no verified match does not imply safety.
+
 ## Run locally
 
 Requires Python 3.11 or newer. From the project directory on macOS:
